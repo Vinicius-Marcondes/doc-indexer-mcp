@@ -1,0 +1,12 @@
+{
+  "name": "workspace-root",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0"
+  }
+}

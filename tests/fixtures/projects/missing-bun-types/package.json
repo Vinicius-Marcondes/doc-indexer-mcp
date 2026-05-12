@@ -1,0 +1,8 @@
+{
+  "name": "missing-bun-types",
+  "type": "module",
+  "scripts": {
+    "start": "bun src/index.ts"
+  },
+  "dependencies": {}
+}
