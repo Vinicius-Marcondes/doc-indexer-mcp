@@ -81,6 +81,10 @@ describe("MCP server registration", () => {
     );
 
     expect(registrar.tools.map((tool) => tool.name)).toEqual([
+      "project_health",
+      "check_before_install",
+      "check_bun_api_usage",
+      "lint_bun_file",
       "analyze_bun_project",
       "search_bun_docs",
       "get_bun_best_practices",
@@ -103,7 +107,8 @@ describe("MCP server registration", () => {
     expect(registrar.resources.map((resource) => resource.name)).toEqual([
       "bun-docs-index",
       "bun-docs-page",
-      "bun-project-analysis"
+      "bun-project-analysis",
+      "bun-project-findings"
     ]);
   });
 
@@ -111,11 +116,15 @@ describe("MCP server registration", () => {
     const manifest = getServerCapabilityManifest();
 
     expect(manifest.tools.map((tool) => [tool.name, standardSchemaInputKeys(tool.inputSchema)])).toEqual([
+      ["project_health", ["projectPath", "focus", "responseMode", "sinceToken", "forceRefresh"]],
+      ["check_before_install", ["projectPath", "packages", "dependencyType", "responseMode", "forceRefresh"]],
+      ["check_bun_api_usage", ["apiName", "projectPath", "usageSnippet", "agentTrainingCutoff", "responseMode", "forceRefresh"]],
+      ["lint_bun_file", ["projectPath", "filePath", "responseMode"]],
       ["analyze_bun_project", ["projectPath", "forceRefresh"]],
       ["search_bun_docs", ["query", "topic", "forceRefresh"]],
       ["get_bun_best_practices", ["topic", "projectPath", "forceRefresh"]],
-      ["plan_bun_dependency", ["projectPath", "packages", "dependencyType"]],
-      ["review_bun_project", ["projectPath", "focus"]]
+      ["plan_bun_dependency", ["projectPath", "packages", "dependencyType", "responseMode"]],
+      ["review_bun_project", ["projectPath", "focus", "responseMode"]]
     ]);
   });
 
@@ -143,5 +152,8 @@ describe("MCP server registration", () => {
       expect(tool.description.length).toBeGreaterThan(20);
       expect(tool.description.length).toBeLessThanOrEqual(160);
     }
+
+    expect(manifest.tools.find((tool) => tool.name === "project_health")?.description).toContain("brief");
+    expect(manifest.tools.find((tool) => tool.name === "check_before_install")?.description).toContain("before");
   });
 });

@@ -2,14 +2,17 @@ import { basename } from "node:path";
 import * as z from "zod/v4";
 import type { Recommendation, ResponseWarning, SourceCitation, Confidence } from "../shared/contracts";
 import { createInvalidInputError, type StructuredError } from "../shared/errors";
+import { responseModeSchema, type ResponseMode } from "../shared/agent-output";
 import { analyzeBunProject } from "./analyze-bun-project";
+import { projectHealth, type ProjectHealthSuccess } from "./project-health";
 
 const focusSchema = z.enum(["typescript", "dependencies", "tests", "lockfile", "runtime", "all"]);
 
 const reviewInputSchema = z
   .object({
     projectPath: z.string().min(1),
-    focus: focusSchema.optional()
+    focus: focusSchema.optional(),
+    responseMode: responseModeSchema.optional()
   })
   .strict();
 
@@ -42,7 +45,15 @@ export interface ReviewBunProjectFailure {
   readonly error: StructuredError;
 }
 
-export type ReviewBunProjectResult = ReviewBunProjectSuccess | ReviewBunProjectFailure;
+export type ReviewBunProjectResult = ReviewBunProjectSuccess | ProjectHealthSuccess | ReviewBunProjectFailure;
+export type ReviewBunProjectLegacyResult = ReviewBunProjectSuccess | ReviewBunProjectFailure;
+export type ReviewBunProjectV2Result = ProjectHealthSuccess | ReviewBunProjectFailure;
+
+export interface ReviewBunProjectV2Input {
+  readonly projectPath: string;
+  readonly focus?: Focus;
+  readonly responseMode: ResponseMode;
+}
 
 type Focus = z.infer<typeof focusSchema>;
 
@@ -106,6 +117,8 @@ function dependencyCompatibilityWarning(): ResponseWarning {
   };
 }
 
+export function reviewBunProject(input: ReviewBunProjectV2Input): ReviewBunProjectV2Result;
+export function reviewBunProject(input: unknown): ReviewBunProjectLegacyResult;
 export function reviewBunProject(input: unknown): ReviewBunProjectResult {
   const parsed = reviewInputSchema.safeParse(input);
 
@@ -117,6 +130,15 @@ export function reviewBunProject(input: unknown): ReviewBunProjectResult {
   }
 
   const focus = parsed.data.focus ?? "all";
+
+  if (parsed.data.responseMode !== undefined) {
+    return projectHealth({
+      projectPath: parsed.data.projectPath,
+      focus,
+      responseMode: parsed.data.responseMode
+    });
+  }
+
   const analysis = analyzeBunProject({ projectPath: parsed.data.projectPath });
 
   if (!analysis.ok) {

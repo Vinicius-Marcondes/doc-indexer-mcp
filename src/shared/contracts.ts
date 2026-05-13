@@ -14,6 +14,7 @@ export type Confidence = z.infer<typeof confidenceSchema>;
 
 export const sourceTypeValues = [
   "bun-docs",
+  "bun-release",
   "npm-registry",
   "mcp-docs",
   "typescript-docs",

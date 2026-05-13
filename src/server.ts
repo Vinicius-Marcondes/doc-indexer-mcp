@@ -5,12 +5,18 @@ import { performance } from "node:perf_hooks";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { SqliteCacheStore } from "./cache/sqlite-cache";
+import { FindingCacheStore } from "./cache/finding-cache";
 import { createAuditLogger, type AuditLogEnv, type AuditLogger } from "./logging/audit-logger";
 import { analyzeBunProject } from "./tools/analyze-bun-project";
 import { searchBunDocs } from "./tools/search-bun-docs";
 import { getBunBestPractices } from "./tools/get-bun-best-practices";
 import { planBunDependency } from "./tools/plan-bun-dependency";
 import { reviewBunProject } from "./tools/review-bun-project";
+import { projectHealth } from "./tools/project-health";
+import { checkBeforeInstall } from "./tools/check-before-install";
+import { checkBunApiUsage } from "./tools/check-bun-api-usage";
+import { lintBunFile } from "./tools/lint-bun-file";
+import { responseModeSchema } from "./shared/agent-output";
 import { SourceFetchClient, type FetchLike } from "./sources/fetch-client";
 import { BunDocsIndexAdapter } from "./sources/bun-docs-index";
 import { BunDocsSearchAdapter } from "./sources/bun-docs-search";
@@ -31,6 +37,11 @@ import {
   bunProjectAnalysisResourceTemplate,
   readBunProjectAnalysisResource
 } from "./resources/bun-project-analysis-resource";
+import {
+  BUN_PROJECT_FINDINGS_RESOURCE_URI_TEMPLATE,
+  bunProjectFindingsResourceTemplate,
+  readBunProjectFindingsResource
+} from "./resources/bun-project-findings-resource";
 import { ProjectAnalysisStore } from "./resources/project-analysis-store";
 
 export interface ServerMetadata {
@@ -45,6 +56,7 @@ export const serverMetadata: ServerMetadata = {
 
 export interface ServerDependencies {
   readonly cache: SqliteCacheStore;
+  readonly findingCacheStore: FindingCacheStore;
   readonly fetchClient: SourceFetchClient;
   readonly bunDocsIndexAdapter: BunDocsIndexAdapter;
   readonly bunDocsSearchAdapter: BunDocsSearchAdapter;
@@ -166,21 +178,95 @@ const planBunDependencyInputSchema = z
   .object({
     projectPath: z.string().min(1),
     packages: z.array(packageRequestSchema).min(1),
-    dependencyType: z.enum(["dependencies", "devDependencies", "optionalDependencies"]).optional()
+    dependencyType: z.enum(["dependencies", "devDependencies", "optionalDependencies"]).optional(),
+    responseMode: responseModeSchema.optional()
   })
   .strict();
 
 const reviewBunProjectInputSchema = z
   .object({
     projectPath: z.string().min(1),
-    focus: focusSchema.optional()
+    focus: focusSchema.optional(),
+    responseMode: responseModeSchema.optional()
+  })
+  .strict();
+
+const projectHealthInputSchema = z
+  .object({
+    projectPath: z.string().min(1),
+    focus: focusSchema.optional(),
+    responseMode: responseModeSchema.optional(),
+    sinceToken: z.string().min(1).optional(),
+    forceRefresh: z.boolean().optional()
+  })
+  .strict();
+
+const checkBeforeInstallInputSchema = z
+  .object({
+    projectPath: z.string().min(1),
+    packages: z.array(packageRequestSchema).min(1),
+    dependencyType: z.enum(["dependencies", "devDependencies", "optionalDependencies"]).optional(),
+    responseMode: responseModeSchema.optional(),
+    forceRefresh: z.boolean().optional()
+  })
+  .strict();
+
+const checkBunApiUsageInputSchema = z
+  .object({
+    apiName: z.string().min(1),
+    projectPath: z.string().min(1).optional(),
+    usageSnippet: z.string().min(1).optional(),
+    agentTrainingCutoff: z.string().min(1).optional(),
+    responseMode: responseModeSchema.optional(),
+    forceRefresh: z.boolean().optional()
+  })
+  .strict();
+
+const lintBunFileInputSchema = z
+  .object({
+    projectPath: z.string().min(1),
+    filePath: z.string().min(1),
+    responseMode: responseModeSchema.optional()
   })
   .strict();
 
 const toolRegistrations: ToolRegistration[] = [
   {
+    name: "project_health",
+    description: "brief V2 project health scan for planning; returns ranked findings, actions, citations, and delta tokens.",
+    inputSchema: projectHealthInputSchema,
+    handler: (input, dependencies) =>
+      projectHealth(input, {
+        analysisStore: dependencies.projectAnalysisStore,
+        findingCache: dependencies.findingCacheStore,
+        now: dependencies.now
+      })
+  },
+  {
+    name: "check_before_install",
+    description: "Check packages before editing dependencies; returns npm-backed findings and approval-gated install actions.",
+    inputSchema: checkBeforeInstallInputSchema,
+    handler: (input, dependencies) =>
+      checkBeforeInstall(input, {
+        registryAdapter: dependencies.npmRegistryAdapter,
+        now: dependencies.now
+      })
+  },
+  {
+    name: "check_bun_api_usage",
+    description: "Check a Bun API against official docs; returns compact guidance, citations, and at most one example.",
+    inputSchema: checkBunApiUsageInputSchema,
+    handler: (input, dependencies) => checkBunApiUsage(input, { docsAdapter: dependencies.bunDocsSearchAdapter })
+  },
+  {
+    name: "lint_bun_file",
+    description: "Lint one file for Bun-specific API, import, type, and safety findings without mutating the project.",
+    inputSchema: lintBunFileInputSchema,
+    handler: (input) => lintBunFile(input)
+  },
+  {
     name: "analyze_bun_project",
-    description: "Inspect a local project and return Bun-specific facts, risks, citations, and recommendations.",
+    description: "Full raw project analysis; agents should prefer project_health for compact planning.",
     inputSchema: analyzeBunProjectInputSchema,
     handler: (input, dependencies) =>
       analyzeBunProject(input, {
@@ -202,7 +288,7 @@ const toolRegistrations: ToolRegistration[] = [
   },
   {
     name: "plan_bun_dependency",
-    description: "Plan Bun dependency add commands with npm registry evidence, without installing packages.",
+    description: "Compatibility dependency planner; agents should prefer check_before_install before package edits.",
     inputSchema: planBunDependencyInputSchema,
     handler: (input, dependencies) => planBunDependency(input, { registryAdapter: dependencies.npmRegistryAdapter })
   },
@@ -253,6 +339,10 @@ function docsPageSlugFromUri(uri: URL): string {
 
 function projectHashFromUri(uri: URL): string {
   return uri.href.replace("bun-project://analysis/", "");
+}
+
+function projectFindingsHashFromUri(uri: URL): string {
+  return uri.href.replace("bun-project://findings/", "");
 }
 
 const resourceRegistrations: ResourceRegistration[] = [
@@ -334,12 +424,42 @@ const resourceRegistrations: ResourceRegistration[] = [
         }
       );
     }
+  },
+  {
+    name: bunProjectFindingsResourceTemplate.name,
+    description: bunProjectFindingsResourceTemplate.description,
+    mimeType: bunProjectFindingsResourceTemplate.mimeType,
+    uriTemplate: bunProjectFindingsResourceTemplate.uriTemplate,
+    register: (registrar, dependencies) => {
+      registrar.registerResource(
+        bunProjectFindingsResourceTemplate.name,
+        new ResourceTemplate(BUN_PROJECT_FINDINGS_RESOURCE_URI_TEMPLATE, { list: undefined }),
+        {
+          title: "Bun project findings",
+          description: bunProjectFindingsResourceTemplate.description,
+          mimeType: bunProjectFindingsResourceTemplate.mimeType
+        },
+        (uri: unknown) => {
+          const resourceUri = uri instanceof URL ? uri : new URL("bun-project://findings/");
+          return toMcpResourceResult(
+            resourceUri.href,
+            readBunProjectFindingsResource(
+              { projectHash: projectFindingsHashFromUri(resourceUri) },
+              {
+                store: dependencies.findingCacheStore
+              }
+            )
+          );
+        }
+      );
+    }
   }
 ];
 
 export function createServerDependencies(options: ServerDependencyOptions = {}): ServerDependencies {
   const now = options.now ?? (() => new Date().toISOString());
-  const cache = new SqliteCacheStore(options.cachePath ?? defaultCachePath());
+  const cachePath = options.cachePath ?? defaultCachePath();
+  const cache = new SqliteCacheStore(cachePath);
   const fetchClient = new SourceFetchClient({
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
     now
@@ -355,6 +475,7 @@ export function createServerDependencies(options: ServerDependencyOptions = {}):
 
   return {
     cache,
+    findingCacheStore: new FindingCacheStore(cachePath),
     fetchClient,
     bunDocsIndexAdapter,
     bunDocsSearchAdapter,

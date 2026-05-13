@@ -1,6 +1,8 @@
 import * as z from "zod/v4";
 import { analyzeLockfiles } from "../analyzers/lockfiles";
 import { createDependencyPlan, type DependencyType } from "../recommendations/dependency-plan";
+import { citationIdForSource } from "../recommendations/finding-normalizer";
+import { responseModeSchema, type AgentAction } from "../shared/agent-output";
 import type { Confidence, ResponseWarning } from "../shared/contracts";
 import { createInvalidInputError, type StructuredError } from "../shared/errors";
 import { resolveProjectRoot } from "../security/project-paths";
@@ -18,7 +20,8 @@ const planInputSchema = z
   .object({
     projectPath: z.string().min(1),
     packages: z.array(packageRequestSchema).min(1),
-    dependencyType: z.enum(["dependencies", "devDependencies", "optionalDependencies"]).optional()
+    dependencyType: z.enum(["dependencies", "devDependencies", "optionalDependencies"]).optional(),
+    responseMode: responseModeSchema.optional()
   })
   .strict();
 
@@ -37,6 +40,7 @@ export type PlanBunDependencySuccess = ReturnType<typeof createDependencyPlan> &
   readonly confidence: Confidence;
   readonly warnings: ResponseWarning[];
   readonly packageManager: string;
+  readonly actions?: AgentAction[];
 };
 
 export type PlanBunDependencyResult = PlanBunDependencySuccess | PlanBunDependencyFailure;
@@ -48,6 +52,20 @@ function nonBunWarning(packageManager: string): ResponseWarning {
     detail: `Dependency command still uses Bun as requested, but lockfile evidence indicates packageManager=${packageManager}.`,
     evidence: [`packageManager=${packageManager}`],
     sources: ["local-project:lockfiles"]
+  };
+}
+
+function installAction(command: string, sourceUrls: readonly string[]): AgentAction {
+  return {
+    id: "action-bun-native-install-command",
+    kind: "command",
+    title: "Install with Bun",
+    command,
+    risk: "medium",
+    requiresApproval: true,
+    reason: "Installing packages mutates package.json and the lockfile; the MCP server only recommends this command.",
+    citationIds: sourceUrls.map(citationIdForSource),
+    relatedFindingIds: ["bun-native-install-command"]
   };
 }
 
@@ -103,6 +121,9 @@ export async function planBunDependency(
     ...plan,
     packageManager,
     confidence: warnings.length === 0 ? "high" : "medium",
-    warnings
+    warnings,
+    ...(parsed.data.responseMode === undefined
+      ? {}
+      : { actions: [installAction(plan.installCommand, plan.sources.map((source) => source.url))] })
   };
 }
