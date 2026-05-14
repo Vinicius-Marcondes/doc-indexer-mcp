@@ -1,4 +1,5 @@
 import type { SqlClient } from "./database";
+import type { StoredDocsChunk, StoredDocsPage, StoredDocsSourceStats } from "../../resources/docs-resources";
 
 export interface DocSource {
   readonly id: number;
@@ -140,6 +141,21 @@ interface PageRow extends Record<string, unknown> {
   readonly content_hash: string;
 }
 
+interface PageDetailRow extends Record<string, unknown> {
+  readonly id: number;
+  readonly source_id: string;
+  readonly url: string;
+  readonly canonical_url: string;
+  readonly title: string;
+  readonly content: string;
+  readonly content_hash: string;
+  readonly fetched_at: string;
+  readonly indexed_at: string;
+  readonly expires_at: string | null;
+  readonly tombstoned_at: string | null;
+  readonly tombstone_reason: string | null;
+}
+
 interface ChunkRow extends Record<string, unknown> {
   readonly id: number;
   readonly source_id: string;
@@ -151,6 +167,31 @@ interface ChunkRow extends Record<string, unknown> {
   readonly content: string;
   readonly content_hash: string;
   readonly token_estimate: number;
+}
+
+interface ChunkDetailRow extends Record<string, unknown> {
+  readonly id: number;
+  readonly source_id: string;
+  readonly page_id: number;
+  readonly url: string;
+  readonly title: string;
+  readonly heading_path: string[];
+  readonly chunk_index: number;
+  readonly content: string;
+  readonly content_hash: string;
+  readonly token_estimate: number;
+  readonly previous_chunk_id: number | null;
+  readonly next_chunk_id: number | null;
+}
+
+interface SourceStatsRow extends Record<string, unknown> {
+  readonly source_id: string;
+  readonly display_name: string;
+  readonly enabled: boolean;
+  readonly allowed_url_patterns: string[];
+  readonly default_ttl_seconds: number;
+  readonly page_count: number;
+  readonly chunk_count: number;
 }
 
 interface EmbeddingRow extends Record<string, unknown> {
@@ -206,6 +247,32 @@ function mapPage(row: PageRow): DocPage {
   };
 }
 
+function toIsoString(value: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? value : new Date(timestamp).toISOString();
+}
+
+function mapPageDetail(row: PageDetailRow): StoredDocsPage {
+  return {
+    id: row.id,
+    sourceId: row.source_id,
+    url: row.url,
+    canonicalUrl: row.canonical_url,
+    title: row.title,
+    content: row.content,
+    contentHash: row.content_hash,
+    fetchedAt: toIsoString(row.fetched_at) ?? row.fetched_at,
+    indexedAt: toIsoString(row.indexed_at) ?? row.indexed_at,
+    expiresAt: toIsoString(row.expires_at),
+    tombstonedAt: toIsoString(row.tombstoned_at),
+    tombstoneReason: row.tombstone_reason
+  };
+}
+
 function mapChunk(row: ChunkRow): DocChunk {
   return {
     id: row.id,
@@ -218,6 +285,35 @@ function mapChunk(row: ChunkRow): DocChunk {
     content: row.content,
     contentHash: row.content_hash,
     tokenEstimate: row.token_estimate
+  };
+}
+
+function mapChunkDetail(row: ChunkDetailRow): StoredDocsChunk {
+  return {
+    id: row.id,
+    sourceId: row.source_id,
+    pageId: row.page_id,
+    url: row.url,
+    title: row.title,
+    headingPath: row.heading_path,
+    chunkIndex: row.chunk_index,
+    content: row.content,
+    contentHash: row.content_hash,
+    tokenEstimate: row.token_estimate,
+    previousChunkId: row.previous_chunk_id === null ? null : Number(row.previous_chunk_id),
+    nextChunkId: row.next_chunk_id === null ? null : Number(row.next_chunk_id)
+  };
+}
+
+function mapSourceStats(row: SourceStatsRow): StoredDocsSourceStats {
+  return {
+    sourceId: row.source_id,
+    displayName: row.display_name,
+    enabled: row.enabled,
+    allowedUrlPatterns: row.allowed_url_patterns,
+    defaultTtlSeconds: row.default_ttl_seconds,
+    pageCount: Number(row.page_count),
+    chunkCount: Number(row.chunk_count)
   };
 }
 
@@ -291,6 +387,26 @@ export class RemoteDocsStorage {
     return rows[0] === undefined ? null : mapSource(rows[0]);
   }
 
+  async listSourceStats(): Promise<StoredDocsSourceStats[]> {
+    const rows = await this.sql<SourceStatsRow[]>`
+      select
+        s.source_id,
+        s.display_name,
+        s.enabled,
+        s.allowed_url_patterns,
+        s.default_ttl_seconds,
+        count(distinct p.id)::integer as page_count,
+        count(c.id)::integer as chunk_count
+      from doc_sources s
+      left join doc_pages p on p.source_id = s.source_id and p.tombstoned_at is null
+      left join doc_chunks c on c.page_id = p.id
+      group by s.source_id, s.display_name, s.enabled, s.allowed_url_patterns, s.default_ttl_seconds
+      order by s.source_id
+    `;
+
+    return rows.map(mapSourceStats);
+  }
+
   async getPageByCanonicalUrl(sourceId: string, canonicalUrl: string): Promise<DocPage | null> {
     const rows = await this.sql<PageRow[]>`
       select id, source_id, url, canonical_url, title, content_hash
@@ -299,6 +415,52 @@ export class RemoteDocsStorage {
     `;
 
     return rows[0] === undefined ? null : mapPage(rows[0]);
+  }
+
+  async getPageByUrl(input: { readonly sourceId: string; readonly url: string }): Promise<StoredDocsPage | null> {
+    const rows = await this.sql<PageDetailRow[]>`
+      select
+        id,
+        source_id,
+        url,
+        canonical_url,
+        title,
+        content,
+        content_hash,
+        fetched_at::text as fetched_at,
+        indexed_at::text as indexed_at,
+        expires_at::text as expires_at,
+        tombstoned_at::text as tombstoned_at,
+        tombstone_reason
+      from doc_pages
+      where source_id = ${input.sourceId}
+        and (url = ${input.url} or canonical_url = ${input.url})
+    `;
+
+    return rows[0] === undefined ? null : mapPageDetail(rows[0]);
+  }
+
+  async getPageById(input: { readonly sourceId: string; readonly pageId: number }): Promise<StoredDocsPage | null> {
+    const rows = await this.sql<PageDetailRow[]>`
+      select
+        id,
+        source_id,
+        url,
+        canonical_url,
+        title,
+        content,
+        content_hash,
+        fetched_at::text as fetched_at,
+        indexed_at::text as indexed_at,
+        expires_at::text as expires_at,
+        tombstoned_at::text as tombstoned_at,
+        tombstone_reason
+      from doc_pages
+      where source_id = ${input.sourceId}
+        and id = ${input.pageId}
+    `;
+
+    return rows[0] === undefined ? null : mapPageDetail(rows[0]);
   }
 
   async upsertPage(input: UpsertPageInput): Promise<DocPage> {
@@ -366,15 +528,56 @@ export class RemoteDocsStorage {
     });
   }
 
-  async getChunksForPage(pageId: number): Promise<DocChunk[]> {
-    const rows = await this.sql<ChunkRow[]>`
-      select id, source_id, page_id, url, title, heading_path, chunk_index, content, content_hash, token_estimate
-      from doc_chunks
-      where page_id = ${pageId}
-      order by chunk_index
+  async getChunksForPage(pageId: number): Promise<StoredDocsChunk[]> {
+    const rows = await this.sql<ChunkDetailRow[]>`
+      select
+        c.id,
+        c.source_id,
+        c.page_id,
+        c.url,
+        c.title,
+        c.heading_path,
+        c.chunk_index,
+        c.content,
+        c.content_hash,
+        c.token_estimate,
+        prev.id as previous_chunk_id,
+        next.id as next_chunk_id
+      from doc_chunks c
+      left join doc_chunks prev on prev.page_id = c.page_id and prev.chunk_index = c.chunk_index - 1
+      left join doc_chunks next on next.page_id = c.page_id and next.chunk_index = c.chunk_index + 1
+      where c.page_id = ${pageId}
+      order by c.chunk_index
     `;
 
-    return rows.map(mapChunk);
+    return rows.map(mapChunkDetail);
+  }
+
+  async getChunkById(input: { readonly sourceId: string; readonly chunkId: number }): Promise<StoredDocsChunk | null> {
+    const rows = await this.sql<ChunkDetailRow[]>`
+      select
+        c.id,
+        c.source_id,
+        c.page_id,
+        c.url,
+        c.title,
+        c.heading_path,
+        c.chunk_index,
+        c.content,
+        c.content_hash,
+        c.token_estimate,
+        prev.id as previous_chunk_id,
+        next.id as next_chunk_id
+      from doc_chunks c
+      join doc_pages p on p.id = c.page_id
+      left join doc_chunks prev on prev.page_id = c.page_id and prev.chunk_index = c.chunk_index - 1
+      left join doc_chunks next on next.page_id = c.page_id and next.chunk_index = c.chunk_index + 1
+      where c.source_id = ${input.sourceId}
+        and c.id = ${input.chunkId}
+        and p.tombstoned_at is null
+    `;
+
+    return rows[0] === undefined ? null : mapChunkDetail(rows[0]);
   }
 
   async deleteChunksForPage(pageId: number): Promise<number> {

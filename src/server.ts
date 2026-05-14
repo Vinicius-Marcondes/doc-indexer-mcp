@@ -9,6 +9,7 @@ import { FindingCacheStore } from "./cache/finding-cache";
 import { createAuditLogger, type AuditLogEnv, type AuditLogger } from "./logging/audit-logger";
 import { analyzeBunProject } from "./tools/analyze-bun-project";
 import { searchDocs, searchDocsInputSchema, type SearchDocsRetrieval } from "./tools/search-docs";
+import { getDocPage, getDocPageInputSchema } from "./tools/get-doc-page";
 import { searchBunDocs } from "./tools/search-bun-docs";
 import { getBunBestPractices } from "./tools/get-bun-best-practices";
 import { planBunDependency } from "./tools/plan-bun-dependency";
@@ -44,6 +45,18 @@ import {
   readBunProjectFindingsResource
 } from "./resources/bun-project-findings-resource";
 import { ProjectAnalysisStore } from "./resources/project-analysis-store";
+import {
+  DOCS_CHUNK_RESOURCE_URI_TEMPLATE,
+  DOCS_PAGE_RESOURCE_URI_TEMPLATE,
+  DOCS_SOURCES_RESOURCE_URI,
+  docsChunkResourceTemplate,
+  docsPageResourceTemplate,
+  docsSourcesResource,
+  readDocsChunkResource,
+  readDocsPageResource,
+  readDocsSourcesResource,
+  type DocsPageStore
+} from "./resources/docs-resources";
 import type { RemoteDocsConfig } from "./config/remote-docs-config";
 import { createPostgresClient } from "./docs/storage/database";
 import { RemoteDocsStorage } from "./docs/storage/docs-storage";
@@ -75,6 +88,7 @@ export interface ServerDependencies {
   readonly projectAnalysisStore: ProjectAnalysisStore;
   readonly docsSourceRegistry: DocsSourceRegistry;
   readonly docsRetrieval?: SearchDocsRetrieval;
+  readonly docsPageStore?: DocsPageStore;
   readonly docsSearchDefaults: {
     readonly defaultLimit: number;
     readonly maxLimit: number;
@@ -91,6 +105,7 @@ export interface ServerDependencyOptions {
   readonly auditLogger?: AuditLogger;
   readonly docsSourceRegistry?: DocsSourceRegistry;
   readonly docsRetrieval?: SearchDocsRetrieval;
+  readonly docsPageStore?: DocsPageStore;
   readonly docsSearchDefaults?: {
     readonly defaultLimit: number;
     readonly maxLimit: number;
@@ -336,6 +351,18 @@ const searchDocsRegistration: ToolRegistration = {
     })
 };
 
+const getDocPageRegistration: ToolRegistration = {
+  name: "get_doc_page",
+  description: "Read one stored allowlisted documentation page and its indexed chunks; remote docs only.",
+  inputSchema: getDocPageInputSchema,
+  handler: (input, dependencies) =>
+    getDocPage(input, {
+      pageStore: dependencies.docsPageStore,
+      sourceRegistry: dependencies.docsSourceRegistry,
+      now: dependencies.now
+    })
+};
+
 function jsonText(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
@@ -381,7 +408,108 @@ function projectFindingsHashFromUri(uri: URL): string {
   return uri.href.replace("bun-project://findings/", "");
 }
 
+function docsResourceParamsFromUri(uri: URL): { readonly sourceId: string; readonly id: string } {
+  const [sourceId = "", id = ""] = uri.pathname
+    .split("/")
+    .filter((part) => part.length > 0)
+    .map((part) => decodeURIComponent(part));
+
+  return { sourceId, id };
+}
+
 const resourceRegistrations: ResourceRegistration[] = [
+  {
+    name: docsSourcesResource.name,
+    description: docsSourcesResource.description,
+    mimeType: docsSourcesResource.mimeType,
+    uri: docsSourcesResource.uri,
+    register: (registrar, dependencies) => {
+      registrar.registerResource(
+        docsSourcesResource.name,
+        DOCS_SOURCES_RESOURCE_URI,
+        {
+          title: "Docs sources",
+          description: docsSourcesResource.description,
+          mimeType: docsSourcesResource.mimeType
+        },
+        async (uri: unknown) =>
+          toMcpResourceResult(
+            uri instanceof URL ? uri.href : DOCS_SOURCES_RESOURCE_URI,
+            await readDocsSourcesResource({
+              pageStore: dependencies.docsPageStore,
+              sourceRegistry: dependencies.docsSourceRegistry,
+              now: dependencies.now
+            })
+          )
+      );
+    }
+  },
+  {
+    name: docsPageResourceTemplate.name,
+    description: docsPageResourceTemplate.description,
+    mimeType: docsPageResourceTemplate.mimeType,
+    uriTemplate: docsPageResourceTemplate.uriTemplate,
+    register: (registrar, dependencies) => {
+      registrar.registerResource(
+        docsPageResourceTemplate.name,
+        new ResourceTemplate(DOCS_PAGE_RESOURCE_URI_TEMPLATE, { list: undefined }),
+        {
+          title: "Docs page",
+          description: docsPageResourceTemplate.description,
+          mimeType: docsPageResourceTemplate.mimeType
+        },
+        async (uri: unknown) => {
+          const resourceUri = uri instanceof URL ? uri : new URL("docs://page/");
+          const params = docsResourceParamsFromUri(resourceUri);
+
+          return toMcpResourceResult(
+            resourceUri.href,
+            await readDocsPageResource(
+              { sourceId: params.sourceId, pageId: params.id },
+              {
+                pageStore: dependencies.docsPageStore,
+                sourceRegistry: dependencies.docsSourceRegistry,
+                now: dependencies.now
+              }
+            )
+          );
+        }
+      );
+    }
+  },
+  {
+    name: docsChunkResourceTemplate.name,
+    description: docsChunkResourceTemplate.description,
+    mimeType: docsChunkResourceTemplate.mimeType,
+    uriTemplate: docsChunkResourceTemplate.uriTemplate,
+    register: (registrar, dependencies) => {
+      registrar.registerResource(
+        docsChunkResourceTemplate.name,
+        new ResourceTemplate(DOCS_CHUNK_RESOURCE_URI_TEMPLATE, { list: undefined }),
+        {
+          title: "Docs chunk",
+          description: docsChunkResourceTemplate.description,
+          mimeType: docsChunkResourceTemplate.mimeType
+        },
+        async (uri: unknown) => {
+          const resourceUri = uri instanceof URL ? uri : new URL("docs://chunk/");
+          const params = docsResourceParamsFromUri(resourceUri);
+
+          return toMcpResourceResult(
+            resourceUri.href,
+            await readDocsChunkResource(
+              { sourceId: params.sourceId, chunkId: params.id },
+              {
+                pageStore: dependencies.docsPageStore,
+                sourceRegistry: dependencies.docsSourceRegistry,
+                now: dependencies.now
+              }
+            )
+          );
+        }
+      );
+    }
+  },
   {
     name: bunDocsIndexResource.name,
     description: bunDocsIndexResource.description,
@@ -493,10 +621,23 @@ const resourceRegistrations: ResourceRegistration[] = [
 ];
 
 const remoteDocsToolNames = new Set(["search_bun_docs"]);
-const remoteDocsResourceNames = new Set([bunDocsIndexResource.name, bunDocsPageResourceTemplate.name]);
+const remoteOnlyResourceNames = new Set([
+  docsSourcesResource.name,
+  docsPageResourceTemplate.name,
+  docsChunkResourceTemplate.name
+]);
+const remoteDocsResourceNames = new Set([
+  docsSourcesResource.name,
+  docsPageResourceTemplate.name,
+  docsChunkResourceTemplate.name,
+  bunDocsIndexResource.name,
+  bunDocsPageResourceTemplate.name
+]);
 
+const localResourceRegistrations = resourceRegistrations.filter((resource) => !remoteOnlyResourceNames.has(resource.name));
 const remoteDocsToolRegistrations = [
   searchDocsRegistration,
+  getDocPageRegistration,
   ...toolRegistrations.filter((tool) => remoteDocsToolNames.has(tool.name))
 ];
 const remoteDocsResourceRegistrations = resourceRegistrations.filter((resource) => remoteDocsResourceNames.has(resource.name));
@@ -529,6 +670,7 @@ export function createServerDependencies(options: ServerDependencyOptions = {}):
     projectAnalysisStore: new ProjectAnalysisStore({ now }),
     docsSourceRegistry: options.docsSourceRegistry ?? defaultDocsSourceRegistry,
     ...(options.docsRetrieval === undefined ? {} : { docsRetrieval: options.docsRetrieval }),
+    ...(options.docsPageStore === undefined ? {} : { docsPageStore: options.docsPageStore }),
     docsSearchDefaults: options.docsSearchDefaults ?? { defaultLimit: 5, maxLimit: 20 },
     auditLogger: options.auditLogger ?? createAuditLogger({ env: options.env, now }),
     now
@@ -564,6 +706,7 @@ export function createRemoteDocsServerDependencies(
   return createServerDependencies({
     ...options,
     docsRetrieval,
+    docsPageStore: storage,
     docsSourceRegistry: options.docsSourceRegistry ?? defaultDocsSourceRegistry,
     docsSearchDefaults: config.search
   });
@@ -590,7 +733,7 @@ function capabilityManifestFor(
 }
 
 export function getServerCapabilityManifest(): ServerCapabilityManifest {
-  return capabilityManifestFor(toolRegistrations, resourceRegistrations);
+  return capabilityManifestFor(toolRegistrations, localResourceRegistrations);
 }
 
 export function getRemoteDocsCapabilityManifest(): ServerCapabilityManifest {
@@ -648,7 +791,7 @@ export function registerBunDevIntelCapabilities(
   registrar: BunDevIntelRegistrar,
   dependencies: ServerDependencies
 ): void {
-  registerCapabilities(registrar, dependencies, toolRegistrations, resourceRegistrations);
+  registerCapabilities(registrar, dependencies, toolRegistrations, localResourceRegistrations);
 }
 
 export function registerRemoteDocsCapabilities(

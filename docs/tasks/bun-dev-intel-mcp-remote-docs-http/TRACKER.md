@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: None
 - Planned validation: None
 - Commit intent: None
-- Notes: Task 17 is complete and ready to commit.
+- Notes: Task 18 is complete and ready to commit.
 
 ## Task Status
 
@@ -71,7 +71,7 @@ Commit message requirement:
 | 15 | Implement pgvector semantic retrieval | done | [15](15-vector-retrieval-pgvector.md) |
 | 16 | Implement hybrid ranking, snippets, and confidence | done | [16](16-hybrid-ranking-confidence-snippets.md) |
 | 17 | Implement `search_docs` MCP tool | done | [17](17-search-docs-tool.md) |
-| 18 | Implement `get_doc_page` and docs resources | todo | [18](18-get-doc-page-and-doc-resources.md) |
+| 18 | Implement `get_doc_page` and docs resources | done | [18](18-get-doc-page-and-doc-resources.md) |
 | 19 | Migrate `search_bun_docs` to docs retrieval compatibility wrapper | todo | [19](19-search-bun-docs-compatibility.md) |
 | 20 | Add refresh job queue, dedupe, and priority scoring | todo | [20](20-refresh-job-queue-and-priority.md) |
 | 21 | Implement docs worker scheduled and on-demand refresh | todo | [21](21-docs-worker-scheduled-and-demand-refresh.md) |
@@ -120,3 +120,5 @@ Commit message requirement:
 | 2026-05-14 | 16 | done | Added central hybrid retrieval with keyword/semantic modes, duplicate merging, exact-match ranking protection, freshness/confidence warnings, low-confidence refresh reason, and hashed telemetry. Focused retrieval tests pass; `bun run typecheck` pass; `bun run check` pass (367 pass, 17 skipped). |
 | 2026-05-14 | 17 | in_progress | Started `search_docs` tool task; will add failing tool and remote registration tests before implementation. |
 | 2026-05-14 | 17 | done | Added remote-only `search_docs` with input/source/limit validation, hybrid retrieval integration, compact cited output, and remote MCP registration while keeping local stdio tools unchanged. Focused tool/MCP tests pass; `bun run typecheck` pass; `bun run check` pass (374 pass, 17 skipped). |
+| 2026-05-14 | 18 | in_progress | Started page/resource task; will add failing get_doc_page and docs resource tests before implementation. |
+| 2026-05-14 | 18 | done | Added `get_doc_page`, DB-backed stored page/chunk read helpers, and read-only `docs://sources`, `docs://page/{sourceId}/{pageId}`, and `docs://chunk/{sourceId}/{chunkId}` resources with source/id validation and freshness metadata. Focused tool/resource/MCP/storage tests pass; `bun run typecheck` pass; `bun run check` pass (383 pass, 17 skipped). |

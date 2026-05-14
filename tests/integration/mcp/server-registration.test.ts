@@ -162,8 +162,14 @@ describe("MCP server registration", () => {
   test("remote docs manifest can be built without DB or network startup", () => {
     const manifest = getRemoteDocsCapabilityManifest();
 
-    expect(manifest.tools.map((tool) => tool.name)).toEqual(["search_docs", "search_bun_docs"]);
-    expect(manifest.resources.map((resource) => resource.name)).toEqual(["bun-docs-index", "bun-docs-page"]);
+    expect(manifest.tools.map((tool) => tool.name)).toEqual(["search_docs", "get_doc_page", "search_bun_docs"]);
+    expect(manifest.resources.map((resource) => resource.name)).toEqual([
+      "docs-sources",
+      "docs-page",
+      "docs-chunk",
+      "bun-docs-index",
+      "bun-docs-page"
+    ]);
   });
 
   test("remote docs manifest excludes project path inputs and local project resources", () => {
@@ -194,7 +200,13 @@ describe("MCP server registration", () => {
     );
 
     expect(fetchCount).toBe(0);
-    expect(registrar.tools.map((tool) => tool.name)).toEqual(["search_docs", "search_bun_docs"]);
-    expect(registrar.resources.map((resource) => resource.name)).toEqual(["bun-docs-index", "bun-docs-page"]);
+    expect(registrar.tools.map((tool) => tool.name)).toEqual(["search_docs", "get_doc_page", "search_bun_docs"]);
+    expect(registrar.resources.map((resource) => resource.name)).toEqual([
+      "docs-sources",
+      "docs-page",
+      "docs-chunk",
+      "bun-docs-index",
+      "bun-docs-page"
+    ]);
   });
 });
