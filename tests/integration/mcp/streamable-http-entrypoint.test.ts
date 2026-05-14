@@ -104,10 +104,10 @@ describe("Streamable HTTP MCP entrypoint", () => {
     const toolNames = body.result.tools.map((tool: { name: string }) => tool.name);
 
     expect(response.status).toBe(200);
-    expect(toolNames).toEqual(["search_bun_docs"]);
+    expect(toolNames).toEqual(["search_docs", "search_bun_docs"]);
     expect(toolNames).not.toContain("analyze_bun_project");
     expect(toolNames).not.toContain("project_health");
-    expect(getRemoteDocsCapabilityManifest().tools.map((tool) => tool.name)).toEqual(["search_bun_docs"]);
+    expect(getRemoteDocsCapabilityManifest().tools.map((tool) => tool.name)).toEqual(["search_docs", "search_bun_docs"]);
   });
 
   test("missing auth never reaches MCP transport", async () => {

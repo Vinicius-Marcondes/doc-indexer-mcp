@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: None
 - Planned validation: None
 - Commit intent: None
-- Notes: Task 16 is complete and ready to commit.
+- Notes: Task 17 is complete and ready to commit.
 
 ## Task Status
 
@@ -70,7 +70,7 @@ Commit message requirement:
 | 14 | Implement Postgres full-text keyword retrieval | done | [14](14-keyword-retrieval-postgres-fts.md) |
 | 15 | Implement pgvector semantic retrieval | done | [15](15-vector-retrieval-pgvector.md) |
 | 16 | Implement hybrid ranking, snippets, and confidence | done | [16](16-hybrid-ranking-confidence-snippets.md) |
-| 17 | Implement `search_docs` MCP tool | todo | [17](17-search-docs-tool.md) |
+| 17 | Implement `search_docs` MCP tool | done | [17](17-search-docs-tool.md) |
 | 18 | Implement `get_doc_page` and docs resources | todo | [18](18-get-doc-page-and-doc-resources.md) |
 | 19 | Migrate `search_bun_docs` to docs retrieval compatibility wrapper | todo | [19](19-search-bun-docs-compatibility.md) |
 | 20 | Add refresh job queue, dedupe, and priority scoring | todo | [20](20-refresh-job-queue-and-priority.md) |
@@ -118,3 +118,5 @@ Commit message requirement:
 | 2026-05-14 | 15 | done | Added provider-backed pgvector semantic retrieval with bounded limits, source/provider/model/version filtering, structured provider failures, dimension validation, and retrieval metadata. Focused vector/embedding/storage tests pass; real Postgres vector cases are gated/skipped without `TEST_DATABASE_URL`; `bun run typecheck` pass; `bun run check` pass (359 pass, 17 skipped). |
 | 2026-05-14 | 16 | in_progress | Started hybrid retrieval task; will add failing merge/ranking/confidence/telemetry tests before implementation. |
 | 2026-05-14 | 16 | done | Added central hybrid retrieval with keyword/semantic modes, duplicate merging, exact-match ranking protection, freshness/confidence warnings, low-confidence refresh reason, and hashed telemetry. Focused retrieval tests pass; `bun run typecheck` pass; `bun run check` pass (367 pass, 17 skipped). |
+| 2026-05-14 | 17 | in_progress | Started `search_docs` tool task; will add failing tool and remote registration tests before implementation. |
+| 2026-05-14 | 17 | done | Added remote-only `search_docs` with input/source/limit validation, hybrid retrieval integration, compact cited output, and remote MCP registration while keeping local stdio tools unchanged. Focused tool/MCP tests pass; `bun run typecheck` pass; `bun run check` pass (374 pass, 17 skipped). |

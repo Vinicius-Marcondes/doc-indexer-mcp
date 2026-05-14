@@ -8,6 +8,7 @@ import { SqliteCacheStore } from "./cache/sqlite-cache";
 import { FindingCacheStore } from "./cache/finding-cache";
 import { createAuditLogger, type AuditLogEnv, type AuditLogger } from "./logging/audit-logger";
 import { analyzeBunProject } from "./tools/analyze-bun-project";
+import { searchDocs, searchDocsInputSchema, type SearchDocsRetrieval } from "./tools/search-docs";
 import { searchBunDocs } from "./tools/search-bun-docs";
 import { getBunBestPractices } from "./tools/get-bun-best-practices";
 import { planBunDependency } from "./tools/plan-bun-dependency";
@@ -43,6 +44,15 @@ import {
   readBunProjectFindingsResource
 } from "./resources/bun-project-findings-resource";
 import { ProjectAnalysisStore } from "./resources/project-analysis-store";
+import type { RemoteDocsConfig } from "./config/remote-docs-config";
+import { createPostgresClient } from "./docs/storage/database";
+import { RemoteDocsStorage } from "./docs/storage/docs-storage";
+import { PostgresKeywordRetrieval } from "./docs/retrieval/keyword-retrieval";
+import { PostgresVectorRetrieval } from "./docs/retrieval/vector-retrieval";
+import { HybridDocsRetrieval } from "./docs/retrieval/hybrid-retrieval";
+import { createOpenAiEmbeddingProviderFromConfig } from "./docs/embeddings/openai-provider";
+import { defaultDocsSourceRegistry } from "./docs/sources/bun-source-pack";
+import type { DocsSourceRegistry } from "./docs/sources/registry";
 
 export interface ServerMetadata {
   readonly name: string;
@@ -63,6 +73,12 @@ export interface ServerDependencies {
   readonly bunDocsPageAdapter: BunDocsPageAdapter;
   readonly npmRegistryAdapter: NpmRegistryAdapter;
   readonly projectAnalysisStore: ProjectAnalysisStore;
+  readonly docsSourceRegistry: DocsSourceRegistry;
+  readonly docsRetrieval?: SearchDocsRetrieval;
+  readonly docsSearchDefaults: {
+    readonly defaultLimit: number;
+    readonly maxLimit: number;
+  };
   readonly auditLogger: AuditLogger;
   readonly now: () => string;
 }
@@ -73,6 +89,12 @@ export interface ServerDependencyOptions {
   readonly now?: () => string;
   readonly env?: AuditLogEnv;
   readonly auditLogger?: AuditLogger;
+  readonly docsSourceRegistry?: DocsSourceRegistry;
+  readonly docsRetrieval?: SearchDocsRetrieval;
+  readonly docsSearchDefaults?: {
+    readonly defaultLimit: number;
+    readonly maxLimit: number;
+  };
 }
 
 export function defaultCachePath(): string {
@@ -300,6 +322,20 @@ const toolRegistrations: ToolRegistration[] = [
   }
 ];
 
+const searchDocsRegistration: ToolRegistration = {
+  name: "search_docs",
+  description: "Search indexed official docs with hybrid keyword and semantic retrieval; remote docs only.",
+  inputSchema: searchDocsInputSchema,
+  handler: (input, dependencies) =>
+    searchDocs(input, {
+      retrieval: dependencies.docsRetrieval,
+      sourceRegistry: dependencies.docsSourceRegistry,
+      now: dependencies.now,
+      defaultLimit: dependencies.docsSearchDefaults.defaultLimit,
+      maxLimit: dependencies.docsSearchDefaults.maxLimit
+    })
+};
+
 function jsonText(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
@@ -459,7 +495,10 @@ const resourceRegistrations: ResourceRegistration[] = [
 const remoteDocsToolNames = new Set(["search_bun_docs"]);
 const remoteDocsResourceNames = new Set([bunDocsIndexResource.name, bunDocsPageResourceTemplate.name]);
 
-const remoteDocsToolRegistrations = toolRegistrations.filter((tool) => remoteDocsToolNames.has(tool.name));
+const remoteDocsToolRegistrations = [
+  searchDocsRegistration,
+  ...toolRegistrations.filter((tool) => remoteDocsToolNames.has(tool.name))
+];
 const remoteDocsResourceRegistrations = resourceRegistrations.filter((resource) => remoteDocsResourceNames.has(resource.name));
 
 export function createServerDependencies(options: ServerDependencyOptions = {}): ServerDependencies {
@@ -488,9 +527,46 @@ export function createServerDependencies(options: ServerDependencyOptions = {}):
     bunDocsPageAdapter,
     npmRegistryAdapter: new NpmRegistryAdapter({ cache, fetchClient, now }),
     projectAnalysisStore: new ProjectAnalysisStore({ now }),
+    docsSourceRegistry: options.docsSourceRegistry ?? defaultDocsSourceRegistry,
+    ...(options.docsRetrieval === undefined ? {} : { docsRetrieval: options.docsRetrieval }),
+    docsSearchDefaults: options.docsSearchDefaults ?? { defaultLimit: 5, maxLimit: 20 },
     auditLogger: options.auditLogger ?? createAuditLogger({ env: options.env, now }),
     now
   };
+}
+
+export function createRemoteDocsServerDependencies(
+  config: RemoteDocsConfig,
+  options: ServerDependencyOptions = {}
+): ServerDependencies {
+  const sql = createPostgresClient(config.database.url);
+  const embeddingProvider = createOpenAiEmbeddingProviderFromConfig(config.embeddings);
+  const keywordRetrieval = new PostgresKeywordRetrieval({
+    sql,
+    defaultLimit: config.search.defaultLimit,
+    maxLimit: config.search.maxLimit
+  });
+  const vectorRetrieval = new PostgresVectorRetrieval({
+    sql,
+    embeddingProvider,
+    defaultLimit: config.search.defaultLimit,
+    maxLimit: config.search.maxLimit
+  });
+  const storage = new RemoteDocsStorage(sql);
+  const docsRetrieval = new HybridDocsRetrieval({
+    keywordRetrieval,
+    vectorRetrieval,
+    telemetry: storage,
+    defaultLimit: config.search.defaultLimit,
+    maxLimit: config.search.maxLimit
+  });
+
+  return createServerDependencies({
+    ...options,
+    docsRetrieval,
+    docsSourceRegistry: options.docsSourceRegistry ?? defaultDocsSourceRegistry,
+    docsSearchDefaults: config.search
+  });
 }
 
 function capabilityManifestFor(

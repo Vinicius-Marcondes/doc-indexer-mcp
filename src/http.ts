@@ -1,7 +1,7 @@
 import { parseRemoteDocsConfig, type RemoteDocsConfigIssue } from "./config/remote-docs-config";
 import { createRemoteHttpApp } from "./http/app";
 import { createRemoteDocsMcpHandler } from "./http/mcp";
-import { createServerDependencies, type ServerDependencies } from "./server";
+import { createRemoteDocsServerDependencies, type ServerDependencies } from "./server";
 
 export interface ServeOptions {
   readonly hostname: string;
@@ -71,7 +71,7 @@ export function startRemoteHttpServer(options: StartRemoteHttpServerOptions = {}
 
   try {
     const config = configResult.config;
-    const dependencies = options.dependencies ?? createServerDependencies();
+    const dependencies = options.dependencies ?? createRemoteDocsServerDependencies(config);
     const app = createRemoteHttpApp({
       bearerToken: config.http.bearerToken,
       allowedOrigins: config.http.allowedOrigins,

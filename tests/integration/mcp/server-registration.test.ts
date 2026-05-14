@@ -162,7 +162,7 @@ describe("MCP server registration", () => {
   test("remote docs manifest can be built without DB or network startup", () => {
     const manifest = getRemoteDocsCapabilityManifest();
 
-    expect(manifest.tools.map((tool) => tool.name)).toEqual(["search_bun_docs"]);
+    expect(manifest.tools.map((tool) => tool.name)).toEqual(["search_docs", "search_bun_docs"]);
     expect(manifest.resources.map((resource) => resource.name)).toEqual(["bun-docs-index", "bun-docs-page"]);
   });
 
@@ -194,7 +194,7 @@ describe("MCP server registration", () => {
     );
 
     expect(fetchCount).toBe(0);
-    expect(registrar.tools.map((tool) => tool.name)).toEqual(["search_bun_docs"]);
+    expect(registrar.tools.map((tool) => tool.name)).toEqual(["search_docs", "search_bun_docs"]);
     expect(registrar.resources.map((resource) => resource.name)).toEqual(["bun-docs-index", "bun-docs-page"]);
   });
 });
