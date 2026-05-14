@@ -108,6 +108,11 @@ export interface DocsRefreshWorkerRecoveryResult {
   readonly staleRunningFailed: number;
 }
 
+interface SourceExclusiveJobSelection {
+  readonly executableJobs: readonly RefreshWorkerJob[];
+  readonly skippedJobs: readonly RefreshWorkerJob[];
+}
+
 export function shouldEnqueueScheduledRefresh(input: {
   readonly latestJob: {
     readonly createdAt?: string;
@@ -202,6 +207,32 @@ function normalizeTimeoutSeconds(value: number): number {
   return Math.min(86400, Math.max(60, Math.floor(value)));
 }
 
+function selectSourceExclusiveJobs(jobs: readonly RefreshWorkerJob[]): SourceExclusiveJobSelection {
+  const sourcesWithBroadJobs = new Set(
+    jobs.filter((job) => job.jobType === "source_index").map((job) => job.sourceId)
+  );
+
+  if (sourcesWithBroadJobs.size === 0) {
+    return {
+      executableJobs: jobs,
+      skippedJobs: []
+    };
+  }
+
+  const executableJobs: RefreshWorkerJob[] = [];
+  const skippedJobs: RefreshWorkerJob[] = [];
+
+  for (const job of jobs) {
+    if (job.jobType !== "source_index" && sourcesWithBroadJobs.has(job.sourceId)) {
+      skippedJobs.push(job);
+    } else {
+      executableJobs.push(job);
+    }
+  }
+
+  return { executableJobs, skippedJobs };
+}
+
 function hasTombstonePolicyStore(store: DocsRefreshWorkerStore): store is DocsRefreshWorkerStore & DocsTombstonePolicyStore {
   const candidate = store as Partial<DocsTombstonePolicyStore>;
 
@@ -293,10 +324,21 @@ export class DocsRefreshWorker {
       limit: this.maxJobsPerRun,
       now
     });
+    const { executableJobs, skippedJobs } = selectSourceExclusiveJobs(jobs);
     let succeeded = 0;
     let failed = 0;
 
-    await runWithConcurrency(jobs, this.maxConcurrency, async (job) => {
+    await Promise.all(
+      skippedJobs.map((job) =>
+        this.store.updateRefreshJobStatus({
+          id: job.id,
+          status: "queued",
+          now
+        })
+      )
+    );
+
+    await runWithConcurrency(executableJobs, this.maxConcurrency, async (job) => {
       let result: DocsRefreshExecutionResult;
 
       try {
@@ -341,7 +383,7 @@ export class DocsRefreshWorker {
     });
 
     return {
-      processed: jobs.length,
+      processed: executableJobs.length,
       succeeded,
       failed,
       recovered

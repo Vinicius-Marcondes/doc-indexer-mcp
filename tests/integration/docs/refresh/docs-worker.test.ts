@@ -12,7 +12,8 @@ import type {
   RefreshJobReason,
   RefreshJobType
 } from "../../../../src/docs/storage/docs-storage";
-import { defaultDocsSourceRegistry } from "../../../../src/docs/sources/bun-source-pack";
+import { bunDocsSourcePack, createDocsSourceRegistry, defaultDocsSourceRegistry, type DocsSourcePack } from "../../../../src/docs/sources/bun-source-pack";
+import type { DocsSourceRegistry } from "../../../../src/docs/sources/registry";
 
 const now = "2026-05-14T12:00:00.000Z";
 const pageUrl = "https://bun.com/docs/runtime/http-server";
@@ -241,14 +242,16 @@ class FakeExecutor implements DocsRefreshJobExecutor {
 function createWorker(options: {
   store?: InMemoryWorkerStore;
   executor?: FakeExecutor;
+  sourceRegistry?: DocsSourceRegistry;
   maxJobsPerRun?: number;
   maxConcurrency?: number;
   runningJobTimeoutSeconds?: number;
 } = {}) {
   const store = options.store ?? new InMemoryWorkerStore();
+  const sourceRegistry = options.sourceRegistry ?? defaultDocsSourceRegistry;
   const queue = new RefreshJobQueue({
     store,
-    sourceRegistry: defaultDocsSourceRegistry,
+    sourceRegistry,
     now: () => now,
     maxPendingJobs: 50,
     maxPendingJobsPerSource: 50
@@ -262,7 +265,7 @@ function createWorker(options: {
       store,
       queue,
       executor,
-      sourceRegistry: defaultDocsSourceRegistry,
+      sourceRegistry,
       now: () => now,
       refreshIntervalSeconds: 7 * 24 * 60 * 60,
       maxJobsPerRun: options.maxJobsPerRun ?? 10,
@@ -270,6 +273,30 @@ function createWorker(options: {
       maxEmbeddingsPerRun: 2000,
       maxConcurrency: options.maxConcurrency ?? 4,
       runningJobTimeoutSeconds: options.runningJobTimeoutSeconds ?? 1800
+    })
+  };
+}
+
+function createTestSourcePack(sourceId: string): DocsSourcePack {
+  return {
+    sourceId,
+    displayName: `${sourceId} docs`,
+    enabled: true,
+    allowedHosts: [`${sourceId}.example.com`],
+    indexUrls: [`https://${sourceId}.example.com/docs/index.txt`],
+    allowedUrlPatterns: [`https://${sourceId}.example.com/docs/*`],
+    chunking: {
+      targetTokens: 900,
+      overlapTokens: 120
+    },
+    refreshPolicy: {
+      defaultTtlSeconds: 604800
+    },
+    checkUrl: (input) => ({
+      allowed: true,
+      sourceId,
+      url: new URL(String(input)),
+      urlKind: "page"
     })
   };
 }
@@ -456,6 +483,41 @@ describe("docs refresh worker", () => {
     expect(result.recovered).toEqual({ staleRunningFailed: 0 });
     expect(result.processed).toBe(0);
     expect(store.jobs.find((job) => job.id === fresh.id)?.status).toBe("running");
+  });
+
+  test("source-level exclusivity skips same-source jobs when source_index is claimed", async () => {
+    const { store, executor, worker } = createWorker({ maxJobsPerRun: 3 });
+    const sourceJob = store.seed({ jobType: "source_index", reason: "scheduled", priority: 100 });
+    const pageJob = store.seed({ url: "https://bun.com/docs/runtime/http-server", jobType: "page", priority: 90 });
+    const embeddingJob = store.seed({ url: "https://bun.com/docs/runtime/typescript", jobType: "embedding", priority: 80 });
+
+    const result = await worker.runOnce();
+
+    expect(result.processed).toBe(1);
+    expect(result.succeeded).toBe(1);
+    expect(executor.sourceIndexCalls).toEqual(["bun"]);
+    expect(executor.pageCalls).toEqual([]);
+    expect(executor.embeddingCalls).toEqual([]);
+    expect(store.jobs.find((job) => job.id === sourceJob.id)?.status).toBe("succeeded");
+    expect(store.jobs.find((job) => job.id === pageJob.id)?.status).toBe("queued");
+    expect(store.jobs.find((job) => job.id === embeddingJob.id)?.status).toBe("queued");
+  });
+
+  test("source-level exclusivity still runs jobs for another source", async () => {
+    const sourceRegistry = createDocsSourceRegistry([bunDocsSourcePack, createTestSourcePack("alt")]);
+    const { store, executor, worker } = createWorker({ sourceRegistry, maxJobsPerRun: 3 });
+    store.seed({ sourceId: "bun", jobType: "source_index", reason: "scheduled", priority: 100 });
+    const bunPageJob = store.seed({ sourceId: "bun", url: "https://bun.com/docs/runtime/http-server", jobType: "page", priority: 90 });
+    const altPageJob = store.seed({ sourceId: "alt", url: "https://alt.example.com/docs/runtime", jobType: "page", priority: 80 });
+
+    const result = await worker.runOnce();
+
+    expect(result.processed).toBe(2);
+    expect(result.succeeded).toBe(2);
+    expect(executor.sourceIndexCalls).toEqual(["bun"]);
+    expect(executor.pageCalls).toEqual(["alt:https://alt.example.com/docs/runtime"]);
+    expect(store.jobs.find((job) => job.id === bunPageJob.id)?.status).toBe("queued");
+    expect(store.jobs.find((job) => job.id === altPageJob.id)?.status).toBe("succeeded");
   });
 
   test("worker respects max jobs per run", async () => {
