@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: none
 - Planned validation: none
 - Commit intent: none
-- Notes: Task 02 completed; ready to advance to Task 03 after the focused commit.
+- Notes: Task 03 completed; ready to advance to Task 04 after the focused commit.
 
 ## Task Status
 
@@ -56,7 +56,7 @@ Commit message requirement:
 | 00 | Revalidate official sources and implementation assumptions | done | [00](00-revalidate-official-sources.md) |
 | 01 | Select MCP SDK/package plan and dependency baseline | done | [01](01-select-sdk-and-dependency-plan.md) |
 | 02 | Partition docs-only remote capabilities from local stdio capabilities | done | [02-capability-partition-docs-only-server.md](02-capability-partition-docs-only-server.md) |
-| 03 | Implement Hono HTTP shell, auth, health, and readiness | todo | [03](03-hono-http-shell-auth-health.md) |
+| 03 | Implement Hono HTTP shell, auth, health, and readiness | done | [03](03-hono-http-shell-auth-health.md) |
 | 04 | Wire Streamable HTTP MCP endpoint | todo | [04](04-streamable-http-mcp-endpoint.md) |
 | 05 | Add runtime configuration and security validation | todo | [05](05-runtime-config-and-security-validation.md) |
 | 06 | Add Postgres and pgvector migrations | todo | [06](06-postgres-pgvector-schema-migrations.md) |
@@ -90,3 +90,5 @@ Commit message requirement:
 | 2026-05-14 | 01 | done | Added Hono, MCP Hono adapter, Postgres, and OpenAI dependency baseline plus package-plan/import tests. Published MCP stdio subpath still fails in this workspace, so local stdio shim remains. Focused tests pass; `bun run typecheck` pass; `bun run check` pass (283 pass, 2 live skipped). |
 | 2026-05-14 | 02 | in_progress | Started capability partition task; will add failing remote docs registration tests before refactoring server registration. |
 | 2026-05-14 | 02 | done | Added docs-only remote capability manifest/registration path while keeping local stdio registration unchanged. Focused MCP registration/stdio tests pass; `bun run typecheck` pass; `bun run check` pass (286 pass, 2 live skipped). |
+| 2026-05-14 | 03 | in_progress | Started Hono HTTP shell task; will add failing auth/health/readiness/body-limit tests before implementation. |
+| 2026-05-14 | 03 | done | Added Hono HTTP app shell with health/readiness, bearer auth, origin/query-token rejection, body limit, and protected `/mcp` placeholder. HTTP and MCP focused tests pass; `bun run typecheck` pass; `bun run check` pass (295 pass, 2 live skipped). |
