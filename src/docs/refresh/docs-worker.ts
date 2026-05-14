@@ -7,6 +7,10 @@ import type {
   RefreshJobType
 } from "../storage/docs-storage";
 import type { RefreshJobQueue, RefreshQueueStore, RefreshQueueStoredJob } from "./refresh-queue";
+import {
+  recordTombstoneRefreshFailure,
+  type DocsTombstonePolicyStore
+} from "./tombstone-policy";
 
 export type DocsRefreshExecutionResult =
   | {
@@ -170,6 +174,12 @@ function normalizeLimit(value: number): number {
   return Math.max(1, Math.floor(value));
 }
 
+function hasTombstonePolicyStore(store: DocsRefreshWorkerStore): store is DocsRefreshWorkerStore & DocsTombstonePolicyStore {
+  const candidate = store as Partial<DocsTombstonePolicyStore>;
+
+  return typeof candidate.recordConfirmedRemovalFailure === "function" && typeof candidate.markPageTombstoned === "function";
+}
+
 export class DocsRefreshWorker {
   private readonly store: DocsRefreshWorkerStore;
   private readonly queue: RefreshJobQueue;
@@ -274,6 +284,17 @@ export class DocsRefreshWorker {
         lastError: structuredErrorText(result.error),
         now: finishedAt
       });
+
+      if (job.url !== null && hasTombstonePolicyStore(this.store)) {
+        await recordTombstoneRefreshFailure({
+          sourceId: job.sourceId,
+          url: job.url,
+          error: result.error,
+          store: this.store,
+          now: finishedAt
+        });
+      }
+
       failed += 1;
     });
 

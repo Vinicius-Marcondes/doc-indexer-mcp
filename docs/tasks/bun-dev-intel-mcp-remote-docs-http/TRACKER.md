@@ -40,14 +40,14 @@ Commit message requirement:
 
 ## Current Task
 
-- Task ID: 21
-- Title: Implement docs worker scheduled and on-demand refresh
+- Task ID: 22
+- Title: Implement stale content and tombstone policy
 - Owner: Codex
 - Status: done
 - Started: 2026-05-14
 - Planned validation: complete
-- Commit intent: Add docs worker command/service for scheduled and queued refresh processing, plus non-blocking on-demand enqueue from search/page tools.
-- Notes: Focused validation pass: `bun test tests/integration/docs/refresh/docs-worker.test.ts tests/integration/docs/refresh/refresh-queue.test.ts`; `bun test tests/integration/tools/search-docs.test.ts tests/integration/tools/get-doc-page.test.ts tests/integration/tools/search-bun-docs.test.ts tests/integration/tools/search-docs-compatibility.test.ts`; `bun test tests/integration/storage/docs-storage.test.ts tests/integration/mcp/server-registration.test.ts`; `bun run typecheck`. Final gates pass: `bun test` (403 pass, 17 skip); `bun run typecheck`; `bun run check` (403 pass, 17 skip). Scope excludes Docker, admin MCP refresh tools, and model-based reranking.
+- Commit intent: Add deterministic freshness policy, source-backed tombstone confirmation, tombstone-aware search/page behavior, and tests.
+- Notes: Focused validation pass: `bun test tests/unit/docs/freshness-policy.test.ts tests/integration/docs/refresh/tombstone-policy.test.ts`; `bun test tests/integration/tools/get-doc-page.test.ts tests/integration/tools/search-docs.test.ts tests/integration/docs/refresh/docs-worker.test.ts`; `bun test tests/integration/storage/docs-storage.test.ts tests/integration/resources/docs-resources.test.ts tests/integration/docs/retrieval/keyword-retrieval.test.ts tests/integration/docs/retrieval/vector-retrieval.test.ts tests/integration/docs/retrieval/hybrid-retrieval.test.ts`; `bun run typecheck`. Final gates pass: `bun test` (410 pass, 17 skip); `bun run typecheck`; `bun run check` (410 pass, 17 skip). Scope excludes broad source discovery changes, row deletion without tombstone metadata, and model-based freshness inference.
 
 ## Task Status
 
@@ -75,7 +75,7 @@ Commit message requirement:
 | 19 | Migrate `search_bun_docs` to docs retrieval compatibility wrapper | done | [19](19-search-bun-docs-compatibility.md) |
 | 20 | Add refresh job queue, dedupe, and priority scoring | done | [20](20-refresh-job-queue-and-priority.md) |
 | 21 | Implement docs worker scheduled and on-demand refresh | done | [21](21-docs-worker-scheduled-and-demand-refresh.md) |
-| 22 | Implement stale content and tombstone policy | todo | [22](22-tombstone-stale-policy.md) |
+| 22 | Implement stale content and tombstone policy | done | [22](22-tombstone-stale-policy.md) |
 | 23 | Add Docker and deployment configuration | todo | [23](23-docker-compose-deployment.md) |
 | 24 | Add final QA, documentation, and traceability | todo | [24](24-final-qa-docs-traceability.md) |
 
@@ -128,3 +128,5 @@ Commit message requirement:
 | 2026-05-14 | 20 | done | Added bounded refresh job queue with allowlist policy rejection, pending/running dedupe, priority scoring, recent-failure delay, queue bounds, and storage helpers. Focused refresh/storage tests pass; `bun run typecheck` pass; `bun run check` pass (391 pass, 17 skipped). |
 | 2026-05-14 | 21 | in_progress | Started docs worker task; will add failing worker processing, scheduling, and on-demand enqueue tests before implementation. |
 | 2026-05-14 | 21 | done | Added docs worker command/service, scheduled source-index enqueue, bounded runnable job claiming, page/source/embedding/tombstone execution dispatch, failed-job error capture, and non-blocking search/page refresh enqueue. Focused worker/queue/tool/storage tests pass; `bun run typecheck` pass; `bun run check` pass (403 pass, 17 skipped). |
+| 2026-05-14 | 22 | in_progress | Started stale/tombstone policy task; will add failing freshness and tombstone tests before implementation. |
+| 2026-05-14 | 22 | done | Added shared freshness policy, source-confirmed tombstone policy, tombstone metadata in page responses, storage tombstone helpers, and worker tombstone handling for confirmed 404/410 failures. Focused freshness/tombstone/tool/worker/retrieval tests pass; `bun run typecheck` pass; `bun run check` pass (410 pass, 17 skipped). |

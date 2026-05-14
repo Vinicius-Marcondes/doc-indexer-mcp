@@ -1,6 +1,7 @@
 import { createNoEvidenceError, createStructuredError, type StructuredError } from "../shared/errors";
 import type { SourceCitation } from "../shared/contracts";
 import type { DocsSourceRegistry } from "../docs/sources/registry";
+import { computeDocsFreshness } from "../docs/refresh/freshness-policy";
 
 export const DOCS_SOURCES_RESOURCE_URI = "docs://sources";
 export const DOCS_PAGE_RESOURCE_URI_TEMPLATE = "docs://page/{sourceId}/{pageId}";
@@ -115,7 +116,7 @@ export interface StoredDocsPageOutput {
   readonly url: string;
   readonly canonicalUrl: string;
   readonly title: string;
-  readonly content: string;
+  readonly content: string | null;
   readonly chunks: readonly StoredDocsChunkOutput[];
   readonly fetchedAt: string;
   readonly indexedAt: string;
@@ -123,6 +124,8 @@ export interface StoredDocsPageOutput {
   readonly freshness: DocsContentFreshness;
   readonly refreshQueued: boolean;
   readonly refreshReason?: "stale_content";
+  readonly tombstonedAt: string | null;
+  readonly tombstoneReason: string | null;
   readonly warnings: readonly DocsResourceWarning[];
   readonly sources: readonly SourceCitation[];
 }
@@ -141,6 +144,8 @@ export interface MissingDocsPageOutput {
   readonly freshness: "missing";
   readonly refreshQueued: boolean;
   readonly refreshReason: "missing_content";
+  readonly tombstonedAt: null;
+  readonly tombstoneReason: null;
   readonly warnings: readonly DocsResourceWarning[];
   readonly sources: readonly [];
 }
@@ -233,22 +238,7 @@ function missingStoreError(): DocsResourceFailure {
 }
 
 function pageFreshness(page: StoredDocsPage, now: string): DocsContentFreshness {
-  if (page.tombstonedAt !== null) {
-    return "missing";
-  }
-
-  if (page.expiresAt === null) {
-    return "fresh";
-  }
-
-  const expiresAtMs = Date.parse(page.expiresAt);
-  const nowMs = Date.parse(now);
-
-  if (Number.isNaN(expiresAtMs) || Number.isNaN(nowMs)) {
-    return "stale";
-  }
-
-  return expiresAtMs <= nowMs ? "stale" : "fresh";
+  return computeDocsFreshness({ page, now }).freshness;
 }
 
 function pageWarnings(page: StoredDocsPage, freshness: DocsContentFreshness): DocsResourceWarning[] {
@@ -328,6 +318,8 @@ export function missingDocsPage(input: {
     freshness: "missing",
     refreshQueued: false,
     refreshReason: "missing_content",
+    tombstonedAt: null,
+    tombstoneReason: null,
     warnings: [
       {
         code: "missing_page",
@@ -344,6 +336,7 @@ export function storedDocsPageOutput(input: {
   readonly generatedAt: string;
 }): StoredDocsPageOutput {
   const freshness = pageFreshness(input.page, input.generatedAt);
+  const tombstoned = input.page.tombstonedAt !== null;
 
   return {
     ok: true,
@@ -353,14 +346,16 @@ export function storedDocsPageOutput(input: {
     url: input.page.url,
     canonicalUrl: input.page.canonicalUrl,
     title: input.page.title,
-    content: input.page.content,
-    chunks: input.chunks.map(chunkOutput),
+    content: tombstoned ? null : input.page.content,
+    chunks: tombstoned ? [] : input.chunks.map(chunkOutput),
     fetchedAt: input.page.fetchedAt,
     indexedAt: input.page.indexedAt,
     contentHash: input.page.contentHash,
     freshness,
     refreshQueued: false,
     ...(freshness === "stale" ? { refreshReason: "stale_content" as const } : {}),
+    tombstonedAt: input.page.tombstonedAt,
+    tombstoneReason: input.page.tombstoneReason,
     warnings: pageWarnings(input.page, freshness),
     sources: [pageSource(input.page)]
   };

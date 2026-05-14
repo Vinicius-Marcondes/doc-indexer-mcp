@@ -472,6 +472,62 @@ export class RemoteDocsStorage {
     return rows[0] === undefined ? null : mapPageDetail(rows[0]);
   }
 
+  async markPageTombstoned(input: {
+    readonly sourceId: string;
+    readonly url: string;
+    readonly reason: string;
+    readonly now: string;
+  }): Promise<StoredDocsPage | null> {
+    const rows = await this.sql<PageDetailRow[]>`
+      update doc_pages
+      set
+        tombstoned_at = ${input.now},
+        tombstone_reason = ${input.reason},
+        updated_at = ${input.now}
+      where source_id = ${input.sourceId}
+        and (url = ${input.url} or canonical_url = ${input.url})
+      returning
+        id,
+        source_id,
+        url,
+        canonical_url,
+        title,
+        content,
+        content_hash,
+        fetched_at::text as fetched_at,
+        indexed_at::text as indexed_at,
+        expires_at::text as expires_at,
+        tombstoned_at::text as tombstoned_at,
+        tombstone_reason
+    `;
+
+    return rows[0] === undefined ? null : mapPageDetail(rows[0]);
+  }
+
+  async recordConfirmedRemovalFailure(input: {
+    readonly sourceId: string;
+    readonly url: string;
+    readonly status: 404 | 410;
+    readonly error: unknown;
+    readonly now: string;
+  }): Promise<number> {
+    const rows = await this.sql<Array<{ count: number }>>`
+      select count(*)::integer as count
+      from doc_refresh_jobs
+      where source_id = ${input.sourceId}
+        and coalesce(url, '') = ${input.url}
+        and job_type in ('page', 'tombstone_check')
+        and status = 'failed'
+        and last_error is not null
+        and (
+          last_error like '%"status":404%'
+          or last_error like '%"status":410%'
+        )
+    `;
+
+    return Number(rows[0]?.count ?? 0);
+  }
+
   async getPageById(input: { readonly sourceId: string; readonly pageId: number }): Promise<StoredDocsPage | null> {
     const rows = await this.sql<PageDetailRow[]>`
       select
