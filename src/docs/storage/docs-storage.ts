@@ -43,8 +43,13 @@ export interface DocChunk {
   readonly id: number;
   readonly sourceId: string;
   readonly pageId: number;
+  readonly url: string;
+  readonly title: string;
+  readonly headingPath: readonly string[];
   readonly chunkIndex: number;
+  readonly content: string;
   readonly contentHash: string;
+  readonly tokenEstimate: number;
 }
 
 export interface InsertChunkInput {
@@ -139,8 +144,13 @@ interface ChunkRow extends Record<string, unknown> {
   readonly id: number;
   readonly source_id: string;
   readonly page_id: number;
+  readonly url: string;
+  readonly title: string;
+  readonly heading_path: string[];
   readonly chunk_index: number;
+  readonly content: string;
   readonly content_hash: string;
+  readonly token_estimate: number;
 }
 
 interface EmbeddingRow extends Record<string, unknown> {
@@ -201,8 +211,13 @@ function mapChunk(row: ChunkRow): DocChunk {
     id: row.id,
     sourceId: row.source_id,
     pageId: row.page_id,
+    url: row.url,
+    title: row.title,
+    headingPath: row.heading_path,
     chunkIndex: row.chunk_index,
-    contentHash: row.content_hash
+    content: row.content,
+    contentHash: row.content_hash,
+    tokenEstimate: row.token_estimate
   };
 }
 
@@ -276,6 +291,16 @@ export class RemoteDocsStorage {
     return rows[0] === undefined ? null : mapSource(rows[0]);
   }
 
+  async getPageByCanonicalUrl(sourceId: string, canonicalUrl: string): Promise<DocPage | null> {
+    const rows = await this.sql<PageRow[]>`
+      select id, source_id, url, canonical_url, title, content_hash
+      from doc_pages
+      where source_id = ${sourceId} and canonical_url = ${canonicalUrl}
+    `;
+
+    return rows[0] === undefined ? null : mapPage(rows[0]);
+  }
+
   async upsertPage(input: UpsertPageInput): Promise<DocPage> {
     const rows = await this.sql<PageRow[]>`
       insert into doc_pages (
@@ -331,7 +356,7 @@ export class RemoteDocsStorage {
             ${chunk.contentHash},
             ${chunk.tokenEstimate}
           )
-          returning id, source_id, page_id, chunk_index, content_hash
+          returning id, source_id, page_id, url, title, heading_path, chunk_index, content, content_hash, token_estimate
         `;
 
         chunks.push(mapChunk(requiredRow(rows, "insertChunks")));
@@ -343,13 +368,41 @@ export class RemoteDocsStorage {
 
   async getChunksForPage(pageId: number): Promise<DocChunk[]> {
     const rows = await this.sql<ChunkRow[]>`
-      select id, source_id, page_id, chunk_index, content_hash
+      select id, source_id, page_id, url, title, heading_path, chunk_index, content, content_hash, token_estimate
       from doc_chunks
       where page_id = ${pageId}
       order by chunk_index
     `;
 
     return rows.map(mapChunk);
+  }
+
+  async deleteChunksForPage(pageId: number): Promise<number> {
+    const rows = await this.sql<Array<{ id: number }>>`
+      delete from doc_chunks
+      where page_id = ${pageId}
+      returning id
+    `;
+
+    return rows.length;
+  }
+
+  async getEmbeddingForChunk(input: {
+    readonly chunkId: number;
+    readonly provider: string;
+    readonly model: string;
+    readonly embeddingVersion: string;
+  }): Promise<DocEmbedding | null> {
+    const rows = await this.sql<EmbeddingRow[]>`
+      select id, chunk_id, provider, model, embedding_version, dimensions
+      from doc_embeddings
+      where chunk_id = ${input.chunkId}
+        and provider = ${input.provider}
+        and model = ${input.model}
+        and embedding_version = ${input.embeddingVersion}
+    `;
+
+    return rows[0] === undefined ? null : mapEmbedding(rows[0]);
   }
 
   async insertEmbedding(input: InsertEmbeddingInput): Promise<DocEmbedding> {

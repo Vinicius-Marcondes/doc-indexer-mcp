@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: None
 - Planned validation: None
 - Commit intent: None
-- Notes: Task 12 is complete and ready to commit.
+- Notes: Task 13 is complete and ready to commit.
 
 ## Task Status
 
@@ -66,7 +66,7 @@ Commit message requirement:
 | 10 | Implement documentation chunking and hashing | done | [10](10-doc-chunking-and-hashing.md) |
 | 11 | Add embedding provider contract and deterministic fake provider | done | [11](11-embedding-provider-interface-and-fake.md) |
 | 12 | Add OpenAI embedding provider | done | [12](12-openai-embedding-provider.md) |
-| 13 | Store ingested pages, chunks, and embeddings | todo | [13](13-ingestion-pipeline-store-pages-chunks-embeddings.md) |
+| 13 | Store ingested pages, chunks, and embeddings | done | [13](13-ingestion-pipeline-store-pages-chunks-embeddings.md) |
 | 14 | Implement Postgres full-text keyword retrieval | todo | [14](14-keyword-retrieval-postgres-fts.md) |
 | 15 | Implement pgvector semantic retrieval | todo | [15](15-vector-retrieval-pgvector.md) |
 | 16 | Implement hybrid ranking, snippets, and confidence | todo | [16](16-hybrid-ranking-confidence-snippets.md) |
@@ -110,3 +110,5 @@ Commit message requirement:
 | 2026-05-14 | 11 | done | Added provider-agnostic embedding contract, deterministic fake provider, structured provider failure helper, and vector dimension validation. Focused embedding tests pass; `bun run typecheck` pass; `bun run check` pass (347 pass, 4 skipped). |
 | 2026-05-14 | 12 | in_progress | Started OpenAI embedding provider task; official docs still show `text-embedding-3-small`, `v1/embeddings`, `encoding_format: "float"`, and 1536 default dimensions. Will add mocked SDK tests before implementation. |
 | 2026-05-14 | 12 | done | Added SDK-backed OpenAI embedding provider with mocked fetch support, batching, ordered response parsing, configured model/dimensions metadata, structured retryable failures, and API-key redaction. Focused OpenAI/config tests pass; `bun run typecheck` pass; `bun run check` pass (354 pass, 4 skipped). |
+| 2026-05-14 | 13 | in_progress | Started ingestion persistence task; will add failing mocked ingestion tests before orchestration/storage changes. |
+| 2026-05-14 | 13 | done | Added Bun docs ingestion orchestration plus storage helpers for page lookup, chunk replacement, and embedding reuse. Focused ingestion/storage/embedding tests pass; real Postgres ingestion cases are gated/skipped without `TEST_DATABASE_URL`; `bun run typecheck` pass; `bun run check` pass (355 pass, 8 skipped). |
