@@ -14,13 +14,15 @@ export interface ReadinessFailure {
 
 export type ReadinessResult = ReadinessSuccess | ReadinessFailure;
 export type ReadinessCheck = () => ReadinessResult | Promise<ReadinessResult>;
-export type McpPlaceholderHandler = (context: Context) => Response | Promise<Response>;
+export type McpHttpHandler = (context: Context) => Response | Promise<Response>;
+export type McpPlaceholderHandler = McpHttpHandler;
 
 export interface RemoteHttpAppOptions {
   readonly bearerToken: string;
   readonly allowedOrigins?: readonly string[];
   readonly maxRequestBodyBytes?: number;
   readonly readinessCheck?: ReadinessCheck;
+  readonly mcpHandler?: McpHttpHandler;
   readonly mcpPlaceholderHandler?: McpPlaceholderHandler;
 }
 
@@ -94,7 +96,7 @@ export function createRemoteHttpApp(options: RemoteHttpAppOptions): Hono {
 
   const app = new Hono();
   const readinessCheck: ReadinessCheck = options.readinessCheck ?? (() => ({ ok: true }));
-  const mcpPlaceholderHandler = options.mcpPlaceholderHandler ?? defaultMcpPlaceholder;
+  const mcpHandler = options.mcpHandler ?? options.mcpPlaceholderHandler ?? defaultMcpPlaceholder;
 
   app.get("/healthz", (context) =>
     context.json({
@@ -133,7 +135,7 @@ export function createRemoteHttpApp(options: RemoteHttpAppOptions): Hono {
     })
   );
 
-  app.on(["GET", "POST", "DELETE"], "/mcp", (context) => mcpPlaceholderHandler(context));
+  app.on(["GET", "POST", "DELETE"], "/mcp", (context) => mcpHandler(context));
 
   return app;
 }

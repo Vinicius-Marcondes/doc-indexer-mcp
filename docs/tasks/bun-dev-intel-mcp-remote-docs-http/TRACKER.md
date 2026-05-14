@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: none
 - Planned validation: none
 - Commit intent: none
-- Notes: Task 03 completed; ready to advance to Task 04 after the focused commit.
+- Notes: Task 04 completed; ready to advance to Task 05 after the focused commit.
 
 ## Task Status
 
@@ -57,7 +57,7 @@ Commit message requirement:
 | 01 | Select MCP SDK/package plan and dependency baseline | done | [01](01-select-sdk-and-dependency-plan.md) |
 | 02 | Partition docs-only remote capabilities from local stdio capabilities | done | [02-capability-partition-docs-only-server.md](02-capability-partition-docs-only-server.md) |
 | 03 | Implement Hono HTTP shell, auth, health, and readiness | done | [03](03-hono-http-shell-auth-health.md) |
-| 04 | Wire Streamable HTTP MCP endpoint | todo | [04](04-streamable-http-mcp-endpoint.md) |
+| 04 | Wire Streamable HTTP MCP endpoint | done | [04](04-streamable-http-mcp-endpoint.md) |
 | 05 | Add runtime configuration and security validation | todo | [05](05-runtime-config-and-security-validation.md) |
 | 06 | Add Postgres and pgvector migrations | todo | [06](06-postgres-pgvector-schema-migrations.md) |
 | 07 | Add database access layer and test harness | todo | [07](07-database-test-harness-and-storage-access.md) |
@@ -92,3 +92,5 @@ Commit message requirement:
 | 2026-05-14 | 02 | done | Added docs-only remote capability manifest/registration path while keeping local stdio registration unchanged. Focused MCP registration/stdio tests pass; `bun run typecheck` pass; `bun run check` pass (286 pass, 2 live skipped). |
 | 2026-05-14 | 03 | in_progress | Started Hono HTTP shell task; will add failing auth/health/readiness/body-limit tests before implementation. |
 | 2026-05-14 | 03 | done | Added Hono HTTP app shell with health/readiness, bearer auth, origin/query-token rejection, body limit, and protected `/mcp` placeholder. HTTP and MCP focused tests pass; `bun run typecheck` pass; `bun run check` pass (295 pass, 2 live skipped). |
+| 2026-05-14 | 04 | in_progress | Started Streamable HTTP endpoint task; will add failing MCP initialize/list/routing and startup-safety tests before transport wiring. |
+| 2026-05-14 | 04 | done | Wired `/mcp` to SDK Streamable HTTP transport with docs-only remote server registration and startup-safe `src/http.ts`; deprecated SSE routes absent. Focused HTTP/MCP/stdio tests pass; `bun run typecheck` pass; `bun run check` pass (301 pass, 2 live skipped). |

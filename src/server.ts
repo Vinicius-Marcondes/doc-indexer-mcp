@@ -591,3 +591,9 @@ export function createBunDevIntelServer(options: CreateBunDevIntelServerOptions 
   registerBunDevIntelCapabilities(server as unknown as BunDevIntelRegistrar, options.dependencies ?? createServerDependencies());
   return server;
 }
+
+export function createRemoteDocsMcpServer(options: CreateBunDevIntelServerOptions = {}): McpServer {
+  const server = new McpServer(serverMetadata);
+  registerRemoteDocsCapabilities(server as unknown as BunDevIntelRegistrar, options.dependencies ?? createServerDependencies());
+  return server;
+}
