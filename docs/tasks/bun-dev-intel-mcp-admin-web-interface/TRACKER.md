@@ -47,14 +47,14 @@ Commit message requirement:
 - Started: 2026-05-14
 - Planned validation: none
 - Commit intent: none
-- Notes: Task 00 is done. Task 01 is next.
+- Notes: Task 01 is done. Task 02 is next.
 
 ## Task Status
 
 | Task | Title | Status | Task File |
 | --- | --- | --- | --- |
 | 00 | Revalidate admin UI stack and package plan | done | [00](00-revalidate-admin-ui-stack-and-package-plan.md) |
-| 01 | Add workspace and admin console scaffold | pending | [01](01-workspace-and-admin-console-scaffold.md) |
+| 01 | Add workspace and admin console scaffold | done | [01](01-workspace-and-admin-console-scaffold.md) |
 | 02 | Add admin auth storage, bootstrap, and sessions | pending | [02](02-admin-auth-storage-bootstrap-sessions.md) |
 | 03 | Add admin read models and KPI queries | pending | [03](03-admin-read-models-and-kpi-queries.md) |
 | 04 | Add admin API routes and contracts | pending | [04](04-admin-api-routes-and-contracts.md) |
@@ -73,3 +73,5 @@ Commit message requirement:
 | 2026-05-14 | Planning | done | Created PRD and implementation tracker for the optional remote docs admin web interface. No implementation started. |
 | 2026-05-14 | 00 | in_progress | Started package/source revalidation for React 19, Vite, Bun, Hono, BHVR structure, and admin UI package plan. |
 | 2026-05-14 | 00 | done | Added source revalidation and package plan. `test -f docs/tasks/bun-dev-intel-mcp-admin-web-interface/source-revalidation.md` pass; typo scan pass; `git diff --check` pass. |
+| 2026-05-14 | 01 | in_progress | Started workspace/admin scaffold task with failing tests for workspaces, admin Hono app factory, and shared smoke schema. |
+| 2026-05-14 | 01 | done | Added workspaces, admin contracts, Hono admin app scaffold, Vite React client scaffold, and scaffold tests. Focused test pass; client build pass; `bun test` pass (444 pass, 18 skipped); `bun run typecheck` pass; `bun run check` pass. |
