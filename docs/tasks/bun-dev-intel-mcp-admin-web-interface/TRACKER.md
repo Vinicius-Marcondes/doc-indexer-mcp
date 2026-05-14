@@ -40,14 +40,14 @@ Commit message requirement:
 
 ## Current Task
 
-- Task ID: none
-- Title: Awaiting next task
+- Task ID: 02
+- Title: Add admin auth storage, bootstrap, and sessions
 - Owner: Codex
-- Status: pending
+- Status: done
 - Started: 2026-05-14
-- Planned validation: none
-- Commit intent: none
-- Notes: Task 01 is done. Task 02 is next.
+- Planned validation: `bun test tests/unit/admin/admin-auth.test.ts tests/integration/admin/admin-auth-storage.test.ts tests/integration/storage/migrations.test.ts` pass; `bun run typecheck` pass; `bun run check` pass
+- Commit intent: Commit admin auth schema, storage/session primitives, middleware, bootstrap helper, and tests.
+- Notes: Focused tests pass; `bun run check` pass. Postgres integration cases are gated by `TEST_DATABASE_URL` and skipped locally.
 
 ## Task Status
 
@@ -55,7 +55,7 @@ Commit message requirement:
 | --- | --- | --- | --- |
 | 00 | Revalidate admin UI stack and package plan | done | [00](00-revalidate-admin-ui-stack-and-package-plan.md) |
 | 01 | Add workspace and admin console scaffold | done | [01](01-workspace-and-admin-console-scaffold.md) |
-| 02 | Add admin auth storage, bootstrap, and sessions | pending | [02](02-admin-auth-storage-bootstrap-sessions.md) |
+| 02 | Add admin auth storage, bootstrap, and sessions | done | [02](02-admin-auth-storage-bootstrap-sessions.md) |
 | 03 | Add admin read models and KPI queries | pending | [03](03-admin-read-models-and-kpi-queries.md) |
 | 04 | Add admin API routes and contracts | pending | [04](04-admin-api-routes-and-contracts.md) |
 | 05 | Build React admin shell, auth flow, and API client | pending | [05](05-react-admin-shell-auth-api-client.md) |
@@ -75,3 +75,5 @@ Commit message requirement:
 | 2026-05-14 | 00 | done | Added source revalidation and package plan. `test -f docs/tasks/bun-dev-intel-mcp-admin-web-interface/source-revalidation.md` pass; typo scan pass; `git diff --check` pass. |
 | 2026-05-14 | 01 | in_progress | Started workspace/admin scaffold task with failing tests for workspaces, admin Hono app factory, and shared smoke schema. |
 | 2026-05-14 | 01 | done | Added workspaces, admin contracts, Hono admin app scaffold, Vite React client scaffold, and scaffold tests. Focused test pass; client build pass; `bun test` pass (444 pass, 18 skipped); `bun run typecheck` pass; `bun run check` pass. |
+| 2026-05-14 | 02 | in_progress | Started admin auth foundation with schema, password/session helpers, middleware, bootstrap storage, and gated Postgres tests. |
+| 2026-05-14 | 02 | done | Added admin auth schema, password/session primitives, Hono auth/role middleware, bootstrap storage, and tests. Focused tests pass; `bun run check` pass. |
