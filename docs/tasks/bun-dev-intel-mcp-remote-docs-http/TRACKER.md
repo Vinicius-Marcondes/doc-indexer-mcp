@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: none
 - Planned validation: none
 - Commit intent: none
-- Notes: Task 05 completed; ready to advance to Task 06 after the focused commit.
+- Notes: Task 06 completed; ready to advance to Task 07 after the focused commit.
 
 ## Task Status
 
@@ -59,7 +59,7 @@ Commit message requirement:
 | 03 | Implement Hono HTTP shell, auth, health, and readiness | done | [03](03-hono-http-shell-auth-health.md) |
 | 04 | Wire Streamable HTTP MCP endpoint | done | [04](04-streamable-http-mcp-endpoint.md) |
 | 05 | Add runtime configuration and security validation | done | [05](05-runtime-config-and-security-validation.md) |
-| 06 | Add Postgres and pgvector migrations | todo | [06](06-postgres-pgvector-schema-migrations.md) |
+| 06 | Add Postgres and pgvector migrations | done | [06](06-postgres-pgvector-schema-migrations.md) |
 | 07 | Add database access layer and test harness | todo | [07](07-database-test-harness-and-storage-access.md) |
 | 08 | Define source-pack contract and Bun allowlist | todo | [08](08-source-pack-contract-and-bun-allowlist.md) |
 | 09 | Implement Bun docs discovery, fetch, and normalization | todo | [09](09-bun-docs-discovery-fetch-normalization.md) |
@@ -96,3 +96,5 @@ Commit message requirement:
 | 2026-05-14 | 04 | done | Wired `/mcp` to SDK Streamable HTTP transport with docs-only remote server registration and startup-safe `src/http.ts`; deprecated SSE routes absent. Focused HTTP/MCP/stdio tests pass; `bun run typecheck` pass; `bun run check` pass (301 pass, 2 live skipped). |
 | 2026-05-14 | 05 | in_progress | Started runtime config task; will add failing config validation/redaction tests before implementation. |
 | 2026-05-14 | 05 | done | Added typed remote docs config parser with required env, weak-token rejection, refresh/search limit validation, redacted errors, and HTTP startup/app integration. Focused config/Hono tests pass; `bun run typecheck` pass; `bun run check` pass (311 pass, 2 live skipped). |
+| 2026-05-14 | 06 | in_progress | Started pgvector schema task; will add failing ordered migration tests plus a `TEST_DATABASE_URL`-gated real Postgres integration test before SQL migration. |
+| 2026-05-14 | 06 | done | Added ordered pgvector schema migration for sources, pages, chunks, embeddings, refresh jobs, and retrieval events. Migration file tests pass; real Postgres execution test is gated/skipped without `TEST_DATABASE_URL`; `bun run typecheck` pass; `bun run check` pass (313 pass, 3 skipped). |
