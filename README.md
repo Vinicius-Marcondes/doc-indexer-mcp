@@ -46,6 +46,22 @@ Monitor tool calls:
 tail -f /tmp/bun-dev-intel-mcp.jsonl
 ```
 
+## Remote Docs HTTP
+
+The project also includes a remote docs-only MCP server over Streamable HTTP for shared documentation search. It runs separately from local stdio:
+
+- local stdio: local project analysis and filesystem-aware tools.
+- remote HTTP: docs-only tools at `/mcp` with bearer-token auth.
+
+Run the HTTP server and worker:
+
+```bash
+bun src/http.ts
+bun src/docs-worker.ts
+```
+
+Docker, compose, auth, refresh, embedding provider, and source-policy details are in [docs/deployment/remote-docs-http.md](docs/deployment/remote-docs-http.md).
+
 ## Safety
 
 - The server is read-only for analyzed projects.

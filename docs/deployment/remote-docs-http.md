@@ -2,11 +2,21 @@
 
 This stack runs the docs-only MCP HTTP server, a separate docs worker, and Postgres with pgvector. Put TLS and public routing in front of the HTTP container with a reverse proxy such as Caddy, Nginx, or your platform load balancer; the app container serves plain HTTP on the private network.
 
+The remote HTTP mode is intentionally docs-only. Keep local stdio for local project analysis and filesystem-aware tools; use remote HTTP for shared documentation intelligence. The remote server exposes `/mcp` over Streamable HTTP and must not receive `projectPath` inputs or inspect local project files.
+
 ## Services
 
 - `mcp-http-server`: runs `bun src/http.ts` and exposes `/healthz`, `/readyz`, and `/mcp`.
 - `docs-worker`: runs `bun src/docs-worker.ts` and processes scheduled and on-demand refresh jobs outside request handling.
 - `postgres-pgvector`: runs the `pgvector/pgvector` Postgres image and stores pages, chunks, embeddings, refresh jobs, and retrieval telemetry.
+
+Remote MCP tools:
+
+- `search_docs`: hybrid keyword and semantic documentation search.
+- `get_doc_page`: stored page and chunk retrieval for allowlisted official docs.
+- `search_bun_docs`: compatibility wrapper backed by the same remote docs retrieval path.
+
+Local stdio remains the surface for `project_health`, `analyze_bun_project`, `review_bun_project`, dependency planning, and any tool that reads a developer's project directory.
 
 ## Environment
 
@@ -34,6 +44,14 @@ Common optional variables:
 
 `MCP_BEARER_TOKEN`, `OPENAI_API_KEY`, and database passwords must be supplied through environment variables or an env file outside source control. The HTTP service requires bearer auth for `/mcp`; do not expose it without TLS.
 
+Embedding provider configuration:
+
+- `EMBEDDING_PROVIDER=openai`
+- `OPENAI_API_KEY=<secret>`
+- `OPENAI_EMBEDDING_MODEL=text-embedding-3-small`
+
+The OpenAI key is used by the docs worker for chunk embeddings and by semantic retrieval for query embeddings. Provider errors are returned as structured warnings or failed jobs; they should not crash the HTTP server.
+
 ## Local Compose
 
 ```bash
@@ -42,6 +60,14 @@ docker compose -f docker-compose.remote-docs.yml --env-file .env.remote-docs up 
 ```
 
 The HTTP server listens on `http://localhost:3000` by default. Use `GET /healthz` for liveness and `GET /readyz` for dependency readiness.
+
+Authenticate MCP clients with:
+
+```text
+Authorization: Bearer <MCP_BEARER_TOKEN>
+```
+
+Tokens in query strings are rejected. Configure `DOCS_ALLOWED_ORIGINS` when browser-based or hosted MCP clients need origin checks.
 
 ## Migrations
 
@@ -60,3 +86,31 @@ bun src/docs-worker.ts
 ```
 
 Use the same image for both commands. Keep the worker separate from the HTTP service so refresh, embedding, and tombstone checks do not block MCP requests.
+
+## Refresh Behavior
+
+The scheduled refresh path is controlled by `DOCS_REFRESH_INTERVAL` and defaults to weekly (`7d`). The docs worker discovers the official Bun docs index, refreshes pages, chunks changed content, writes embeddings, and records failures without blocking MCP requests.
+
+On-demand refresh can be queued by docs tools when content is missing, stale, or low confidence. These jobs are bounded, deduplicated by source/URL/job type, and processed by `bun src/docs-worker.ts`. Search returns the best available cited evidence promptly and reports `refreshQueued`.
+
+## Source Policy
+
+V1 indexes only official Bun documentation:
+
+- `https://bun.com/docs/llms.txt`
+- `https://bun.com/docs/llms-full.txt`
+- pages under `https://bun.com/docs/`
+
+The source pack rejects non-HTTPS URLs, hostname tricks, path traversal, disallowed redirects, and non-Bun domains. Adding another source pack requires a PRD update and allowlist tests.
+
+## Quality Gates
+
+Run these before changing deployment configuration or cutting a release:
+
+```bash
+bun test
+bun run typecheck
+bun run check
+```
+
+`bun run check` runs `bun test && bun run typecheck`. Live source checks remain opt-in and are separate from the deterministic default gates.

@@ -40,14 +40,14 @@ Commit message requirement:
 
 ## Current Task
 
-- Task ID: 23
-- Title: Add Docker and deployment configuration
+- Task ID: none
+- Title: Project conclusion
 - Owner: Codex
 - Status: done
 - Started: 2026-05-14
-- Planned validation: `bun test tests/unit/deployment/docker-config.test.ts` pass; `bun run typecheck` pass; `bun run check` pass
-- Commit intent: Add Dockerfile, compose example, env example, and deployment documentation for separate HTTP server, docs worker, and Postgres/pgvector services.
-- Notes: Added placeholder-only env docs and local compose wiring; scope excludes production secret management beyond env docs, cloud-specific IaC, and TLS termination implementation.
+- Planned validation: `bun test tests/e2e/remote-docs-http-flow.test.ts tests/unit/deployment/remote-docs-handoff.test.ts` pass; `bun test` pass; `bun run typecheck` pass; `bun run check` pass
+- Commit intent: Commit final QA, documentation, traceability, and tracker conclusion for the remote docs HTTP project.
+- Notes: All tasks 00-24 are done. Final gates pass with 419 pass and 17 skipped; skipped cases are opt-in live or `TEST_DATABASE_URL`-gated infrastructure tests.
 
 ## Task Status
 
@@ -77,7 +77,7 @@ Commit message requirement:
 | 21 | Implement docs worker scheduled and on-demand refresh | done | [21](21-docs-worker-scheduled-and-demand-refresh.md) |
 | 22 | Implement stale content and tombstone policy | done | [22](22-tombstone-stale-policy.md) |
 | 23 | Add Docker and deployment configuration | done | [23](23-docker-compose-deployment.md) |
-| 24 | Add final QA, documentation, and traceability | todo | [24](24-final-qa-docs-traceability.md) |
+| 24 | Add final QA, documentation, and traceability | done | [24](24-final-qa-docs-traceability.md) |
 
 ## Work Log
 
@@ -132,3 +132,6 @@ Commit message requirement:
 | 2026-05-14 | 22 | done | Added shared freshness policy, source-confirmed tombstone policy, tombstone metadata in page responses, storage tombstone helpers, and worker tombstone handling for confirmed 404/410 failures. Focused freshness/tombstone/tool/worker/retrieval tests pass; `bun run typecheck` pass; `bun run check` pass (410 pass, 17 skipped). |
 | 2026-05-14 | 23 | in_progress | Started Docker deployment task; will add failing deployment config tests before adding Dockerfile, compose, env example, and docs. |
 | 2026-05-14 | 23 | done | Added Dockerfile, compose stack, env example, and deployment docs for separate HTTP server, docs worker, and Postgres/pgvector services. Focused deployment config tests pass; `bun run typecheck` pass; `bun run check` pass (415 pass, 17 skipped). |
+| 2026-05-14 | 24 | in_progress | Started final QA task; will add failing remote docs HTTP e2e and traceability/docs coverage before final handoff updates. |
+| 2026-05-14 | 24 | done | Added remote HTTP e2e coverage, handoff docs coverage, deployment/README updates, and traceability checklist. Focused Task 24 tests pass; `bun test` pass; `bun run typecheck` pass; `bun run check` pass (419 pass, 17 skipped). |
+| 2026-05-14 | Project | done | Remote Docs Intelligence MCP over Streamable HTTP is complete: all tracker tasks are done, PRD traceability is documented, stdio/local behavior remains covered, and final quality gates pass. |
