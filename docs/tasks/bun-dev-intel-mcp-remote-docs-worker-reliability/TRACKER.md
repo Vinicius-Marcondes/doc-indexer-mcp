@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: n/a
 - Planned validation: n/a
 - Commit intent: n/a
-- Notes: Task 01 implementation complete. Validation: `bun test tests/integration/docs/refresh/docs-worker.test.ts` pass; `bun run typecheck` pass; `bun run check` pass.
+- Notes: Task 02 implementation complete. Validation: `bun test tests/unit/config/remote-docs-config.test.ts` pass; `bun test tests/integration/docs/refresh/docs-worker.test.ts` pass; `bun test tests/unit/deployment/docker-config.test.ts` pass; `bun run typecheck` pass; `bun run check` pass.
 
 ## Task Status
 
@@ -55,7 +55,7 @@ Commit message requirement:
 | --- | --- | --- | --- |
 | 00 | Make embedding storage idempotent | done | [00](00-idempotent-embedding-storage.md) |
 | 01 | Mark jobs failed when execution throws | done | [01](01-worker-exception-handling.md) |
-| 02 | Recover stale running jobs | todo | [02](02-stale-running-job-recovery.md) |
+| 02 | Recover stale running jobs | done | [02](02-stale-running-job-recovery.md) |
 | 03 | Add source-level job exclusivity | todo | [03](03-source-level-job-exclusivity.md) |
 | 04 | Improve worker logs and deployment docs | todo | [04](04-worker-logging-and-deployment-docs.md) |
 | 05 | Final QA and traceability | todo | [05](05-final-qa-traceability.md) |
@@ -69,3 +69,5 @@ Commit message requirement:
 | 2026-05-14 | 00 | done | Implemented idempotent embedding insert with existing-row compatibility validation. Validation passed; DB-backed tests skipped without `TEST_DATABASE_URL`. |
 | 2026-05-14 | 01 | in_progress | Started per-job exception handling; planned worker refresh tests, typecheck, and check validation. |
 | 2026-05-14 | 01 | done | Wrapped per-job execution exceptions into sanitized failed-job results and verified continuation after throws. Validation passed. |
+| 2026-05-14 | 02 | in_progress | Started stale running job recovery; planned config, worker, deployment docs, typecheck, and check validation. |
+| 2026-05-14 | 02 | done | Added timeout config, bounded stale running job recovery before claim, recovery stats, and env/deployment docs. Validation passed. |

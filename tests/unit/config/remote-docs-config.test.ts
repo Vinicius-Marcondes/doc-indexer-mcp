@@ -44,6 +44,19 @@ describe("remote docs runtime config", () => {
     });
     expect(result.config.search).toEqual({ defaultLimit: 5, maxLimit: 20 });
     expect(result.config.refresh.interval).toEqual({ raw: "7d", seconds: 604800 });
+    expect(result.config.refresh.runningTimeoutSeconds).toBe(1800);
+  });
+
+  test("valid running job timeout parses", () => {
+    const result = parseRemoteDocsConfig(validEnv({ DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS: "3600" }));
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.config.refresh.runningTimeoutSeconds).toBe(3600);
   });
 
   test("OpenAI-compatible local embedding base URL parses", () => {
@@ -130,6 +143,25 @@ describe("remote docs runtime config", () => {
 
     expect(result.ok).toBe(false);
     expect(result.ok ? "" : result.error.issues.map((issue) => issue.path).join(",")).toContain("DOCS_REFRESH_INTERVAL");
+  });
+
+  test("invalid running job timeout fails without leaking secrets", () => {
+    const result = parseRemoteDocsConfig(
+      validEnv({
+        MCP_BEARER_TOKEN: "super-secret-bearer-token-value",
+        DATABASE_URL: "postgres://secret-user:secret-pass@localhost:5432/docs",
+        OPENAI_API_KEY: "sk-secret-openai-key",
+        DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS: "10"
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.ok ? "" : result.error.issues.map((issue) => issue.path).join(",")).toContain("DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS");
+
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("super-secret-bearer-token-value");
+    expect(serialized).not.toContain("secret-pass");
+    expect(serialized).not.toContain("sk-secret-openai-key");
   });
 
   test("default search limit above max fails", () => {

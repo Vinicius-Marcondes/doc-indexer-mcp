@@ -29,6 +29,12 @@ export interface RefreshWorkerJob extends RefreshQueueStoredJob {
 }
 
 export interface DocsRefreshWorkerStore extends RefreshQueueStore {
+  readonly recoverStaleRunningRefreshJobs: (input: {
+    readonly now: string;
+    readonly staleBefore: string;
+    readonly limit: number;
+    readonly timeoutSeconds: number;
+  }) => Promise<readonly RefreshWorkerJob[]>;
   readonly claimRunnableRefreshJobs: (input: {
     readonly limit: number;
     readonly now: string;
@@ -77,6 +83,7 @@ export interface DocsRefreshWorkerOptions {
   readonly maxPagesPerRun: number;
   readonly maxEmbeddingsPerRun: number;
   readonly maxConcurrency: number;
+  readonly runningJobTimeoutSeconds: number;
 }
 
 export interface ScheduledRefreshResult {
@@ -90,10 +97,15 @@ export interface DocsRefreshWorkerRunResult {
   readonly processed: number;
   readonly succeeded: number;
   readonly failed: number;
+  readonly recovered?: DocsRefreshWorkerRecoveryResult;
 }
 
 export interface DocsRefreshWorkerCycleResult extends DocsRefreshWorkerRunResult {
   readonly scheduled: ScheduledRefreshResult;
+}
+
+export interface DocsRefreshWorkerRecoveryResult {
+  readonly staleRunningFailed: number;
 }
 
 export function shouldEnqueueScheduledRefresh(input: {
@@ -182,6 +194,14 @@ function normalizeLimit(value: number): number {
   return Math.max(1, Math.floor(value));
 }
 
+function normalizeTimeoutSeconds(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1800;
+  }
+
+  return Math.min(86400, Math.max(60, Math.floor(value)));
+}
+
 function hasTombstonePolicyStore(store: DocsRefreshWorkerStore): store is DocsRefreshWorkerStore & DocsTombstonePolicyStore {
   const candidate = store as Partial<DocsTombstonePolicyStore>;
 
@@ -199,6 +219,7 @@ export class DocsRefreshWorker {
   private readonly maxPagesPerRun: number;
   private readonly maxEmbeddingsPerRun: number;
   private readonly maxConcurrency: number;
+  private readonly runningJobTimeoutSeconds: number;
 
   constructor(options: DocsRefreshWorkerOptions) {
     this.store = options.store;
@@ -211,6 +232,7 @@ export class DocsRefreshWorker {
     this.maxPagesPerRun = normalizeLimit(options.maxPagesPerRun);
     this.maxEmbeddingsPerRun = normalizeLimit(options.maxEmbeddingsPerRun);
     this.maxConcurrency = normalizeLimit(options.maxConcurrency);
+    this.runningJobTimeoutSeconds = normalizeTimeoutSeconds(options.runningJobTimeoutSeconds);
   }
 
   async enqueueScheduledRefresh(): Promise<ScheduledRefreshResult> {
@@ -265,9 +287,11 @@ export class DocsRefreshWorker {
   }
 
   async runOnce(): Promise<DocsRefreshWorkerRunResult> {
+    const now = this.now();
+    const recovered = await this.recoverStaleRunningJobs(now);
     const jobs = await this.store.claimRunnableRefreshJobs({
       limit: this.maxJobsPerRun,
-      now: this.now()
+      now
     });
     let succeeded = 0;
     let failed = 0;
@@ -319,7 +343,8 @@ export class DocsRefreshWorker {
     return {
       processed: jobs.length,
       succeeded,
-      failed
+      failed,
+      recovered
     };
   }
 
@@ -357,6 +382,22 @@ export class DocsRefreshWorker {
           ...(job.url === null ? {} : { url: job.url })
         });
     }
+  }
+
+  private async recoverStaleRunningJobs(now: string): Promise<DocsRefreshWorkerRecoveryResult> {
+    const nowMs = Date.parse(now);
+    const baseMs = Number.isNaN(nowMs) ? Date.now() : nowMs;
+    const staleBefore = new Date(baseMs - this.runningJobTimeoutSeconds * 1000).toISOString();
+    const recovered = await this.store.recoverStaleRunningRefreshJobs({
+      now,
+      staleBefore,
+      limit: this.maxJobsPerRun,
+      timeoutSeconds: this.runningJobTimeoutSeconds
+    });
+
+    return {
+      staleRunningFailed: recovered.length
+    };
   }
 }
 

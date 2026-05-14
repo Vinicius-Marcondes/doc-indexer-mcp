@@ -877,6 +877,70 @@ export class RemoteDocsStorage {
     return rows.map(mapRefreshJob);
   }
 
+  async recoverStaleRunningRefreshJobs(input: {
+    readonly now: string;
+    readonly staleBefore: string;
+    readonly limit: number;
+    readonly timeoutSeconds: number;
+  }): Promise<RefreshJob[]> {
+    const rows = await this.sql<RefreshJobRow[]>`
+      with stale as (
+        select id
+        from doc_refresh_jobs
+        where status = 'running'
+          and coalesce(started_at, updated_at) <= ${input.staleBefore}
+        order by coalesce(started_at, updated_at) asc, id asc
+        limit ${input.limit}
+        for update skip locked
+      )
+      update doc_refresh_jobs
+      set
+        status = 'failed',
+        last_error = json_build_object(
+          'code',
+          'internal_error',
+          'message',
+          'Docs refresh job exceeded running timeout.',
+          'details',
+          json_build_object(
+            'jobId',
+            doc_refresh_jobs.id,
+            'sourceId',
+            doc_refresh_jobs.source_id,
+            'jobType',
+            doc_refresh_jobs.job_type,
+            'attemptCount',
+            doc_refresh_jobs.attempt_count,
+            'startedAt',
+            coalesce(doc_refresh_jobs.started_at, doc_refresh_jobs.updated_at)::text,
+            'timeoutSeconds',
+            ${input.timeoutSeconds},
+            'ageSeconds',
+            greatest(0, floor(extract(epoch from (${input.now}::timestamptz - coalesce(doc_refresh_jobs.started_at, doc_refresh_jobs.updated_at))))::integer)
+          )
+        )::text,
+        updated_at = ${input.now},
+        finished_at = ${input.now}
+      where id in (select id from stale)
+      returning
+        id,
+        source_id,
+        url,
+        job_type,
+        reason,
+        status,
+        priority,
+        run_after::text as run_after,
+        attempt_count,
+        last_error,
+        created_at::text as created_at,
+        updated_at::text as updated_at,
+        finished_at::text as finished_at
+    `;
+
+    return rows.map(mapRefreshJob);
+  }
+
   async getLatestRefreshJob(input: {
     readonly sourceId: string;
     readonly jobType: RefreshJobType;

@@ -98,7 +98,8 @@ export function createDocsRefreshWorker(input: {
     maxJobsPerRun: input.config.refresh.maxPagesPerRun + input.config.refresh.maxEmbeddingsPerRun,
     maxPagesPerRun: input.config.refresh.maxPagesPerRun,
     maxEmbeddingsPerRun: input.config.refresh.maxEmbeddingsPerRun,
-    maxConcurrency: input.config.refresh.maxConcurrency
+    maxConcurrency: input.config.refresh.maxConcurrency,
+    runningJobTimeoutSeconds: input.config.refresh.runningTimeoutSeconds
   });
 }
 

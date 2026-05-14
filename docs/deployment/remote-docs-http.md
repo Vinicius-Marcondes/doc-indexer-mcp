@@ -36,6 +36,7 @@ Required variables:
 Common optional variables:
 
 - `DOCS_WORKER_POLL_SECONDS`
+- `DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS`
 - `DOCS_REFRESH_MAX_PAGES_PER_RUN`
 - `DOCS_REFRESH_MAX_EMBEDDINGS_PER_RUN`
 - `DOCS_REFRESH_MAX_CONCURRENCY`
@@ -106,6 +107,8 @@ Use the same image for both commands. Keep the worker separate from the HTTP ser
 ## Refresh Behavior
 
 The scheduled refresh path is controlled by `DOCS_REFRESH_INTERVAL` and defaults to weekly (`7d`). In Docker Compose, `DOCS_WORKER_POLL_SECONDS` controls how often the long-running worker service wakes up to run one worker cycle; the default is 300 seconds. The docs worker discovers the official Bun docs index, refreshes pages, chunks changed content, writes embeddings, and records failures without blocking MCP requests.
+
+Before claiming queued jobs, the worker marks stale `running` jobs as failed. `DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS` controls the timeout and defaults to 1800 seconds. This recovers jobs left behind by worker crashes or container restarts without requiring direct SQL edits in normal operation.
 
 On-demand refresh can be queued by docs tools when content is missing, stale, or low confidence. These jobs are bounded, deduplicated by source/URL/job type, and processed by `bun src/docs-worker.ts`. Search returns the best available cited evidence promptly and reports `refreshQueued`.
 
