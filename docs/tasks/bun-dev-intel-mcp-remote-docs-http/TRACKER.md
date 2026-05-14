@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: None
 - Planned validation: None
 - Commit intent: None
-- Notes: Task 15 is complete and ready to commit.
+- Notes: Task 16 is complete and ready to commit.
 
 ## Task Status
 
@@ -69,7 +69,7 @@ Commit message requirement:
 | 13 | Store ingested pages, chunks, and embeddings | done | [13](13-ingestion-pipeline-store-pages-chunks-embeddings.md) |
 | 14 | Implement Postgres full-text keyword retrieval | done | [14](14-keyword-retrieval-postgres-fts.md) |
 | 15 | Implement pgvector semantic retrieval | done | [15](15-vector-retrieval-pgvector.md) |
-| 16 | Implement hybrid ranking, snippets, and confidence | todo | [16](16-hybrid-ranking-confidence-snippets.md) |
+| 16 | Implement hybrid ranking, snippets, and confidence | done | [16](16-hybrid-ranking-confidence-snippets.md) |
 | 17 | Implement `search_docs` MCP tool | todo | [17](17-search-docs-tool.md) |
 | 18 | Implement `get_doc_page` and docs resources | todo | [18](18-get-doc-page-and-doc-resources.md) |
 | 19 | Migrate `search_bun_docs` to docs retrieval compatibility wrapper | todo | [19](19-search-bun-docs-compatibility.md) |
@@ -116,3 +116,5 @@ Commit message requirement:
 | 2026-05-14 | 14 | done | Added Postgres keyword retrieval with source filtering, bounded limits, generated search-vector ranking, exact code/CLI term boosts, snippets, and retrieval metadata. Focused keyword/storage tests pass; real Postgres retrieval cases are gated/skipped without `TEST_DATABASE_URL`; `bun run typecheck` pass; `bun run check` pass (356 pass, 13 skipped). |
 | 2026-05-14 | 15 | in_progress | Started semantic retrieval task; will add failing pgvector and provider-failure tests before implementation. |
 | 2026-05-14 | 15 | done | Added provider-backed pgvector semantic retrieval with bounded limits, source/provider/model/version filtering, structured provider failures, dimension validation, and retrieval metadata. Focused vector/embedding/storage tests pass; real Postgres vector cases are gated/skipped without `TEST_DATABASE_URL`; `bun run typecheck` pass; `bun run check` pass (359 pass, 17 skipped). |
+| 2026-05-14 | 16 | in_progress | Started hybrid retrieval task; will add failing merge/ranking/confidence/telemetry tests before implementation. |
+| 2026-05-14 | 16 | done | Added central hybrid retrieval with keyword/semantic modes, duplicate merging, exact-match ranking protection, freshness/confidence warnings, low-confidence refresh reason, and hashed telemetry. Focused retrieval tests pass; `bun run typecheck` pass; `bun run check` pass (367 pass, 17 skipped). |
