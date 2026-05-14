@@ -390,6 +390,20 @@ function validateEmbedding(input: InsertEmbeddingInput): void {
   }
 }
 
+function validateExistingEmbeddingCompatibility(input: InsertEmbeddingInput, existing: DocEmbedding): void {
+  if (existing.chunkId !== input.chunkId) {
+    throw new Error("Existing embedding chunk does not match requested chunk.");
+  }
+
+  if (existing.provider !== input.provider || existing.model !== input.model || existing.embeddingVersion !== input.embeddingVersion) {
+    throw new Error("Existing embedding metadata does not match requested embedding.");
+  }
+
+  if (existing.dimensions !== input.dimensions) {
+    throw new Error(`Existing embedding dimensions ${existing.dimensions} do not match requested dimensions ${input.dimensions}.`);
+  }
+}
+
 export class RemoteDocsStorage {
   constructor(private readonly sql: SqlClient) {}
 
@@ -702,10 +716,29 @@ export class RemoteDocsStorage {
     const rows = await this.sql<EmbeddingRow[]>`
       insert into doc_embeddings (chunk_id, provider, model, embedding_version, dimensions, embedding)
       values (${input.chunkId}, ${input.provider}, ${input.model}, ${input.embeddingVersion}, ${input.dimensions}, ${vectorLiteral}::vector)
+      on conflict (chunk_id, provider, model, embedding_version) do nothing
       returning id, chunk_id, provider, model, embedding_version, dimensions
     `;
+    const inserted = rows[0];
 
-    return mapEmbedding(requiredRow(rows, "insertEmbedding"));
+    if (inserted !== undefined) {
+      return mapEmbedding(inserted);
+    }
+
+    const existing = await this.getEmbeddingForChunk({
+      chunkId: input.chunkId,
+      provider: input.provider,
+      model: input.model,
+      embeddingVersion: input.embeddingVersion
+    });
+
+    if (existing === null) {
+      throw new Error("Expected existing embedding after idempotent insert conflict.");
+    }
+
+    validateExistingEmbeddingCompatibility(input, existing);
+
+    return existing;
   }
 
   async createRefreshJob(input: CreateRefreshJobInput): Promise<RefreshJob> {
