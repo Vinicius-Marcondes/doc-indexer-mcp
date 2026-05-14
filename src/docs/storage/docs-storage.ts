@@ -914,7 +914,7 @@ export class RemoteDocsStorage {
             'startedAt',
             coalesce(doc_refresh_jobs.started_at, doc_refresh_jobs.updated_at)::text,
             'timeoutSeconds',
-            ${input.timeoutSeconds},
+            ${input.timeoutSeconds}::integer,
             'ageSeconds',
             greatest(0, floor(extract(epoch from (${input.now}::timestamptz - coalesce(doc_refresh_jobs.started_at, doc_refresh_jobs.updated_at))))::integer)
           )

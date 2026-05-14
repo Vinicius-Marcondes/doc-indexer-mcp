@@ -68,6 +68,29 @@ describe("remote docs storage access", () => {
     expect(sqlCalls).toBe(2);
   });
 
+  test("casts stale recovery timeout before embedding it in Postgres JSON", async () => {
+    let capturedStrings: readonly string[] = [];
+    let capturedValues: readonly unknown[] = [];
+    const sql = (async (strings: TemplateStringsArray, ...values: readonly unknown[]) => {
+      capturedStrings = Array.from(strings);
+      capturedValues = values;
+      return [];
+    }) as unknown as SqlClient;
+    const storage = new RemoteDocsStorage(sql);
+
+    await storage.recoverStaleRunningRefreshJobs({
+      now: "2026-05-14T12:00:00.000Z",
+      staleBefore: "2026-05-14T11:30:00.000Z",
+      limit: 50,
+      timeoutSeconds: 1800
+    });
+
+    const timeoutSecondsValueIndex = capturedValues.indexOf(1800);
+
+    expect(timeoutSecondsValueIndex).toBeGreaterThanOrEqual(0);
+    expect((capturedStrings[timeoutSecondsValueIndex + 1] ?? "").trimStart()).toStartWith("::integer");
+  });
+
   const postgresTest = process.env.TEST_DATABASE_URL === undefined ? test.skip : test;
 
   postgresTest("inserts duplicate embeddings idempotently without overwriting the original vector", async () => {
