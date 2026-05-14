@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: none
 - Planned validation: none
 - Commit intent: none
-- Notes: Task 04 completed; ready to advance to Task 05 after the focused commit.
+- Notes: Task 05 completed; ready to advance to Task 06 after the focused commit.
 
 ## Task Status
 
@@ -58,7 +58,7 @@ Commit message requirement:
 | 02 | Partition docs-only remote capabilities from local stdio capabilities | done | [02-capability-partition-docs-only-server.md](02-capability-partition-docs-only-server.md) |
 | 03 | Implement Hono HTTP shell, auth, health, and readiness | done | [03](03-hono-http-shell-auth-health.md) |
 | 04 | Wire Streamable HTTP MCP endpoint | done | [04](04-streamable-http-mcp-endpoint.md) |
-| 05 | Add runtime configuration and security validation | todo | [05](05-runtime-config-and-security-validation.md) |
+| 05 | Add runtime configuration and security validation | done | [05](05-runtime-config-and-security-validation.md) |
 | 06 | Add Postgres and pgvector migrations | todo | [06](06-postgres-pgvector-schema-migrations.md) |
 | 07 | Add database access layer and test harness | todo | [07](07-database-test-harness-and-storage-access.md) |
 | 08 | Define source-pack contract and Bun allowlist | todo | [08](08-source-pack-contract-and-bun-allowlist.md) |
@@ -94,3 +94,5 @@ Commit message requirement:
 | 2026-05-14 | 03 | done | Added Hono HTTP app shell with health/readiness, bearer auth, origin/query-token rejection, body limit, and protected `/mcp` placeholder. HTTP and MCP focused tests pass; `bun run typecheck` pass; `bun run check` pass (295 pass, 2 live skipped). |
 | 2026-05-14 | 04 | in_progress | Started Streamable HTTP endpoint task; will add failing MCP initialize/list/routing and startup-safety tests before transport wiring. |
 | 2026-05-14 | 04 | done | Wired `/mcp` to SDK Streamable HTTP transport with docs-only remote server registration and startup-safe `src/http.ts`; deprecated SSE routes absent. Focused HTTP/MCP/stdio tests pass; `bun run typecheck` pass; `bun run check` pass (301 pass, 2 live skipped). |
+| 2026-05-14 | 05 | in_progress | Started runtime config task; will add failing config validation/redaction tests before implementation. |
+| 2026-05-14 | 05 | done | Added typed remote docs config parser with required env, weak-token rejection, refresh/search limit validation, redacted errors, and HTTP startup/app integration. Focused config/Hono tests pass; `bun run typecheck` pass; `bun run check` pass (311 pass, 2 live skipped). |

@@ -1,4 +1,5 @@
-import { createRemoteHttpApp, type RemoteHttpAppOptions } from "./http/app";
+import { parseRemoteDocsConfig, type RemoteDocsConfigIssue } from "./config/remote-docs-config";
+import { createRemoteHttpApp } from "./http/app";
 import { createRemoteDocsMcpHandler } from "./http/mcp";
 import { createServerDependencies, type ServerDependencies } from "./server";
 
@@ -33,69 +34,62 @@ export interface RemoteHttpStartupFailure {
   readonly error: {
     readonly code: "startup_failed";
     readonly message: string;
+    readonly issues?: readonly RemoteDocsConfigIssue[];
   };
 }
 
 export type RemoteHttpStartupResult = RemoteHttpStartupSuccess | RemoteHttpStartupFailure;
 
-function parsePort(value: string | undefined): number {
-  if (value === undefined || value.trim().length === 0) {
-    return 3000;
-  }
-
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : 3000;
-}
-
-function optionsFromEnv(env: Record<string, string | undefined>): Pick<RemoteHttpAppOptions, "allowedOrigins" | "maxRequestBodyBytes"> {
-  const allowedOrigins = env.DOCS_ALLOWED_ORIGINS?.split(",")
-    .map((origin) => origin.trim())
-    .filter((origin) => origin.length > 0);
-  const maxRequestBodyBytes = env.MCP_HTTP_MAX_REQUEST_BODY_BYTES;
-
+function envWithOptionOverrides(
+  env: Record<string, string | undefined>,
+  options: StartRemoteHttpServerOptions
+): Record<string, string | undefined> {
   return {
-    ...(allowedOrigins === undefined || allowedOrigins.length === 0 ? {} : { allowedOrigins }),
-    ...(maxRequestBodyBytes === undefined ? {} : { maxRequestBodyBytes: Number(maxRequestBodyBytes) })
+    ...env,
+    ...(options.host === undefined ? {} : { MCP_HTTP_HOST: options.host }),
+    ...(options.port === undefined ? {} : { MCP_HTTP_PORT: String(options.port) }),
+    ...(options.bearerToken === undefined ? {} : { MCP_BEARER_TOKEN: options.bearerToken }),
+    ...(options.allowedOrigins === undefined ? {} : { DOCS_ALLOWED_ORIGINS: options.allowedOrigins.join(",") }),
+    ...(options.maxRequestBodyBytes === undefined ? {} : { MCP_HTTP_MAX_REQUEST_BODY_BYTES: String(options.maxRequestBodyBytes) })
   };
 }
 
 export function startRemoteHttpServer(options: StartRemoteHttpServerOptions = {}): RemoteHttpStartupResult {
-  const env = options.env ?? Bun.env;
-  const bearerToken = options.bearerToken ?? env.MCP_BEARER_TOKEN;
+  const env = envWithOptionOverrides(options.env ?? Bun.env, options);
+  const configResult = parseRemoteDocsConfig(env);
 
-  if (bearerToken === undefined || bearerToken.trim().length === 0) {
+  if (!configResult.ok) {
     return {
       ok: false,
       error: {
         code: "startup_failed",
-        message: "MCP_BEARER_TOKEN is required for the remote HTTP server."
+        message: configResult.error.message,
+        issues: configResult.error.issues
       }
     };
   }
 
   try {
-    const host = options.host ?? env.MCP_HTTP_HOST ?? "0.0.0.0";
-    const port = options.port ?? parsePort(env.MCP_HTTP_PORT);
+    const config = configResult.config;
     const dependencies = options.dependencies ?? createServerDependencies();
     const app = createRemoteHttpApp({
-      ...optionsFromEnv(env),
-      bearerToken,
-      ...(options.allowedOrigins === undefined ? {} : { allowedOrigins: options.allowedOrigins }),
-      ...(options.maxRequestBodyBytes === undefined ? {} : { maxRequestBodyBytes: options.maxRequestBodyBytes }),
+      bearerToken: config.http.bearerToken,
+      allowedOrigins: config.http.allowedOrigins,
+      maxRequestBodyBytes: config.http.maxRequestBodyBytes,
       mcpHandler: createRemoteDocsMcpHandler({ dependencies })
     });
     const serve = options.serve ?? Bun.serve;
     const server = serve({
-      hostname: host,
-      port,
+      hostname: config.http.host,
+      port: config.http.port,
       fetch: app.fetch
     });
 
     return {
       ok: true,
       server,
-      host,
-      port
+      host: config.http.host,
+      port: config.http.port
     };
   } catch {
     return {

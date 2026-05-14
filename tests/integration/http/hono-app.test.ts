@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { parseRemoteDocsConfig } from "../../../src/config/remote-docs-config";
 import { createRemoteHttpApp } from "../../../src/http/app";
 
 const bearerToken = "test-token";
@@ -153,5 +154,62 @@ describe("remote Hono HTTP shell", () => {
     expect(response.status).toBe(413);
     expect(body).toMatchObject({ ok: false, error: { code: "request_body_too_large" } });
     expect(placeholderCalls).toBe(0);
+  });
+
+  test("app uses parsed config for auth, origin, and body limit behavior", async () => {
+    const parsed = parseRemoteDocsConfig({
+      MCP_HTTP_HOST: "127.0.0.1",
+      MCP_HTTP_PORT: "3000",
+      MCP_BEARER_TOKEN: "remote-docs-token-1234567890",
+      DATABASE_URL: "postgres://docs:docs-password@localhost:5432/docs",
+      EMBEDDING_PROVIDER: "openai",
+      OPENAI_API_KEY: "sk-test-openai-key",
+      OPENAI_EMBEDDING_MODEL: "text-embedding-3-small",
+      DOCS_ALLOWED_ORIGINS: "https://agent.example.com",
+      MCP_HTTP_MAX_REQUEST_BODY_BYTES: "12"
+    });
+
+    expect(parsed.ok).toBe(true);
+
+    if (!parsed.ok) {
+      return;
+    }
+
+    const app = createRemoteHttpApp({
+      bearerToken: parsed.config.http.bearerToken,
+      allowedOrigins: parsed.config.http.allowedOrigins,
+      maxRequestBodyBytes: parsed.config.http.maxRequestBodyBytes,
+      mcpPlaceholderHandler: (c) => c.json({ ok: true })
+    });
+
+    const accepted = await app.request("/mcp", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${parsed.config.http.bearerToken}`,
+        origin: "https://agent.example.com"
+      },
+      body: "{}"
+    });
+    const rejectedOrigin = await app.request("/mcp", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${parsed.config.http.bearerToken}`,
+        origin: "https://evil.example.com"
+      },
+      body: "{}"
+    });
+    const rejectedBody = await app.request("/mcp", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${parsed.config.http.bearerToken}`,
+        origin: "https://agent.example.com",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ tooLarge: true })
+    });
+
+    expect(accepted.status).toBe(200);
+    expect(rejectedOrigin.status).toBe(403);
+    expect(rejectedBody.status).toBe(413);
   });
 });
