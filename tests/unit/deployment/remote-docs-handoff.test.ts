@@ -67,4 +67,28 @@ describe("remote docs HTTP handoff documentation", () => {
     expect(traceability).not.toContain("| todo |");
     expect(traceability).not.toContain("| blocked |");
   });
+
+  test("worker reliability traceability maps PRD requirements to implementation and tests", async () => {
+    const traceability = await readText("docs/tasks/bun-dev-intel-mcp-remote-docs-worker-reliability/traceability-checklist.md");
+
+    expect(traceability).toContain("| PRD requirement | Implementation file(s) | Test file(s) | Status |");
+
+    for (const requirement of [
+      "Idempotent embedding insert",
+      "Per-job exception handling",
+      "Stale running job recovery",
+      "Source-level job exclusivity",
+      "Safe worker failure logs",
+      "Running timeout configuration",
+      "Remote HTTP remains docs-only",
+      "Local stdio remains intact"
+    ]) {
+      expect(traceability).toContain(requirement);
+    }
+
+    expect(traceability).toContain("tests/integration/mcp/streamable-http-entrypoint.test.ts");
+    expect(traceability).toContain("tests/integration/mcp/stdio-entrypoint.test.ts");
+    expect(traceability).not.toContain("| todo |");
+    expect(traceability).not.toContain("| blocked |");
+  });
 });

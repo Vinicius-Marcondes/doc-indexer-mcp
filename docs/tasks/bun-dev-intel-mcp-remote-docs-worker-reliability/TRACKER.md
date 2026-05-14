@@ -41,13 +41,13 @@ Commit message requirement:
 ## Current Task
 
 - Task ID: none
-- Title: Not started
-- Owner: unassigned
-- Status: todo
+- Title: Complete
+- Owner: Codex
+- Status: done
 - Started: n/a
-- Planned validation: n/a
+- Planned validation: complete
 - Commit intent: n/a
-- Notes: Task 04 implementation complete. Validation: `bun test tests/integration/docs/refresh/docs-worker.test.ts` pass; `bun test tests/unit/deployment/remote-docs-handoff.test.ts tests/unit/deployment/docker-config.test.ts` pass; `bun run typecheck` pass; `bun run check` pass.
+- Notes: All tasks complete. Final validation passed: focused storage, worker, config, deployment docs, HTTP/stdio boundary tests; `bun test`; `bun run typecheck`; `bun run check`. Database-backed tests skipped where `TEST_DATABASE_URL` is not set.
 
 ## Task Status
 
@@ -58,7 +58,7 @@ Commit message requirement:
 | 02 | Recover stale running jobs | done | [02](02-stale-running-job-recovery.md) |
 | 03 | Add source-level job exclusivity | done | [03](03-source-level-job-exclusivity.md) |
 | 04 | Improve worker logs and deployment docs | done | [04](04-worker-logging-and-deployment-docs.md) |
-| 05 | Final QA and traceability | todo | [05](05-final-qa-traceability.md) |
+| 05 | Final QA and traceability | done | [05](05-final-qa-traceability.md) |
 
 ## Work Log
 
@@ -75,3 +75,5 @@ Commit message requirement:
 | 2026-05-14 | 03 | done | Added source-level broad-job exclusivity and requeued skipped same-source jobs. Validation passed. |
 | 2026-05-14 | 04 | in_progress | Started safe worker logging and deployment monitoring docs; planned worker, deployment docs, typecheck, and check validation. |
 | 2026-05-14 | 04 | done | Added sanitized job failure and stale recovery logs plus deployment monitoring SQL. Validation passed. |
+| 2026-05-14 | 05 | in_progress | Started final QA and traceability; planned checklist plus focused boundary checks and final gates. |
+| 2026-05-14 | 05 | done | Added worker reliability traceability checklist. Focused checks and final gates `bun test`, `bun run typecheck`, and `bun run check` passed. |
