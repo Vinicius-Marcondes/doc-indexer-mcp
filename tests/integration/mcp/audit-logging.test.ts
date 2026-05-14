@@ -117,16 +117,16 @@ describe("MCP audit logging integration", () => {
 
     registerBunDevIntelCapabilities(registrar, {
       ...baseDependencies,
-      bunDocsSearchAdapter: {
+      docsRetrieval: {
         search: async () => {
-          throw new Error("adapter exploded");
+          throw new Error("retrieval exploded");
         }
-      } as unknown as ServerDependencies["bunDocsSearchAdapter"]
+      } as unknown as ServerDependencies["docsRetrieval"]
     });
 
     const searchDocs = getTool(registrar, "search_bun_docs");
 
-    await expect(searchDocs({ query: "typescript" })).rejects.toThrow("adapter exploded");
+    await expect(searchDocs({ query: "typescript" })).rejects.toThrow("retrieval exploded");
 
     const events = readJsonl(logPath);
     const endEvent = events.find((event) => event.event === "tool_call_end");
@@ -136,7 +136,7 @@ describe("MCP audit logging integration", () => {
       status: "error",
       error: {
         name: "Error",
-        message: "adapter exploded"
+        message: "retrieval exploded"
       }
     });
     expect(JSON.stringify(endEvent)).not.toContain("stack");

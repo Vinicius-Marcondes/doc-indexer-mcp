@@ -123,7 +123,7 @@ describe("MCP server registration", () => {
       ["check_bun_api_usage", ["apiName", "projectPath", "usageSnippet", "agentTrainingCutoff", "responseMode", "forceRefresh"]],
       ["lint_bun_file", ["projectPath", "filePath", "responseMode"]],
       ["analyze_bun_project", ["projectPath", "forceRefresh"]],
-      ["search_bun_docs", ["query", "topic", "forceRefresh"]],
+      ["search_bun_docs", ["query", "topic", "limit", "forceRefresh"]],
       ["get_bun_best_practices", ["topic", "projectPath", "forceRefresh"]],
       ["plan_bun_dependency", ["projectPath", "packages", "dependencyType", "responseMode"]],
       ["review_bun_project", ["projectPath", "focus", "responseMode"]]

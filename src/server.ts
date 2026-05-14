@@ -10,7 +10,7 @@ import { createAuditLogger, type AuditLogEnv, type AuditLogger } from "./logging
 import { analyzeBunProject } from "./tools/analyze-bun-project";
 import { searchDocs, searchDocsInputSchema, type SearchDocsRetrieval } from "./tools/search-docs";
 import { getDocPage, getDocPageInputSchema } from "./tools/get-doc-page";
-import { searchBunDocs } from "./tools/search-bun-docs";
+import { searchBunDocs, searchBunDocsInputSchema } from "./tools/search-bun-docs";
 import { getBunBestPractices } from "./tools/get-bun-best-practices";
 import { planBunDependency } from "./tools/plan-bun-dependency";
 import { reviewBunProject } from "./tools/review-bun-project";
@@ -195,14 +195,6 @@ const analyzeBunProjectInputSchema = z
   })
   .strict();
 
-const searchBunDocsInputSchema = z
-  .object({
-    query: z.string().min(1),
-    topic: topicSchema.optional(),
-    forceRefresh: z.boolean().optional()
-  })
-  .strict();
-
 const getBunBestPracticesInputSchema = z
   .object({
     topic: bestPracticeTopicSchema,
@@ -315,7 +307,14 @@ const toolRegistrations: ToolRegistration[] = [
     name: "search_bun_docs",
     description: "Search official Bun documentation and return cited, cache-aware excerpts.",
     inputSchema: searchBunDocsInputSchema,
-    handler: (input, dependencies) => searchBunDocs(input, { adapter: dependencies.bunDocsSearchAdapter })
+    handler: (input, dependencies) =>
+      searchBunDocs(input, {
+        retrieval: dependencies.docsRetrieval,
+        sourceRegistry: dependencies.docsSourceRegistry,
+        now: dependencies.now,
+        defaultLimit: dependencies.docsSearchDefaults.defaultLimit,
+        maxLimit: dependencies.docsSearchDefaults.maxLimit
+      })
   },
   {
     name: "get_bun_best_practices",

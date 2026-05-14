@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: None
 - Planned validation: None
 - Commit intent: None
-- Notes: Task 18 is complete and ready to commit.
+- Notes: Task 19 is complete and ready to commit.
 
 ## Task Status
 
@@ -72,7 +72,7 @@ Commit message requirement:
 | 16 | Implement hybrid ranking, snippets, and confidence | done | [16](16-hybrid-ranking-confidence-snippets.md) |
 | 17 | Implement `search_docs` MCP tool | done | [17](17-search-docs-tool.md) |
 | 18 | Implement `get_doc_page` and docs resources | done | [18](18-get-doc-page-and-doc-resources.md) |
-| 19 | Migrate `search_bun_docs` to docs retrieval compatibility wrapper | todo | [19](19-search-bun-docs-compatibility.md) |
+| 19 | Migrate `search_bun_docs` to docs retrieval compatibility wrapper | done | [19](19-search-bun-docs-compatibility.md) |
 | 20 | Add refresh job queue, dedupe, and priority scoring | todo | [20](20-refresh-job-queue-and-priority.md) |
 | 21 | Implement docs worker scheduled and on-demand refresh | todo | [21](21-docs-worker-scheduled-and-demand-refresh.md) |
 | 22 | Implement stale content and tombstone policy | todo | [22](22-tombstone-stale-policy.md) |
@@ -122,3 +122,5 @@ Commit message requirement:
 | 2026-05-14 | 17 | done | Added remote-only `search_docs` with input/source/limit validation, hybrid retrieval integration, compact cited output, and remote MCP registration while keeping local stdio tools unchanged. Focused tool/MCP tests pass; `bun run typecheck` pass; `bun run check` pass (374 pass, 17 skipped). |
 | 2026-05-14 | 18 | in_progress | Started page/resource task; will add failing get_doc_page and docs resource tests before implementation. |
 | 2026-05-14 | 18 | done | Added `get_doc_page`, DB-backed stored page/chunk read helpers, and read-only `docs://sources`, `docs://page/{sourceId}/{pageId}`, and `docs://chunk/{sourceId}/{chunkId}` resources with source/id validation and freshness metadata. Focused tool/resource/MCP/storage tests pass; `bun run typecheck` pass; `bun run check` pass (383 pass, 17 skipped). |
+| 2026-05-14 | 19 | in_progress | Started `search_bun_docs` compatibility task; will add failing wrapper/delegation tests before implementation. |
+| 2026-05-14 | 19 | done | Routed `search_bun_docs` through the generic `search_docs` retrieval path with Bun source defaults, topic query boosts, compatibility result fields, freshness/retrieval metadata, and wrapper regression tests. Focused wrapper/generic/e2e/audit tests pass; `bun run typecheck` pass; `bun run check` pass (384 pass, 17 skipped). |

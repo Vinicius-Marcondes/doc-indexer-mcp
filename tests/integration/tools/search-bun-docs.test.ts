@@ -1,137 +1,190 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { resolve } from "node:path";
-import { SqliteCacheStore } from "../../../src/cache/sqlite-cache";
-import { BUN_DOCS_FULL_URL, BunDocsSearchAdapter } from "../../../src/sources/bun-docs-search";
-import { SourceFetchClient, type FetchLike } from "../../../src/sources/fetch-client";
+import { describe, expect, test } from "bun:test";
 import { searchBunDocs } from "../../../src/tools/search-bun-docs";
+import type { DocsRetrievalInput, DocsRetrievalResult } from "../../../src/docs/retrieval/hybrid-retrieval";
+import { defaultDocsSourceRegistry } from "../../../src/docs/sources/bun-source-pack";
 
-const tempDirs: string[] = [];
+const generatedAt = "2026-05-14T12:00:00.000Z";
 
-const mockedDocs = `# TypeScript
-URL: https://bun.com/docs/runtime/typescript
-Install @types/bun and set types to ["bun"] for Bun TypeScript projects.
+function docsResult(input: DocsRetrievalInput): DocsRetrievalResult {
+  const packageManagerBoost = input.query.includes("bun.lock");
 
-# Lockfile
-URL: https://bun.com/docs/pm/lockfile
-Bun uses bun.lock. Legacy bun.lockb should be migrated.
-`;
-
-function createStore(): SqliteCacheStore {
-  const dir = mkdtempSync(resolve(tmpdir(), "bun-dev-intel-search-tool-"));
-  tempDirs.push(dir);
-  return new SqliteCacheStore(resolve(dir, "cache.sqlite"));
+  return {
+    query: input.query.trim(),
+    sourceId: "bun",
+    mode: "hybrid",
+    limit: input.limit ?? 5,
+    results: [
+      packageManagerBoost
+        ? {
+            chunkId: 2,
+            pageId: 20,
+            title: "Lockfile",
+            url: "https://bun.com/docs/pm/lockfile",
+            headingPath: ["Package manager", "Lockfile"],
+            snippet: "Bun uses bun.lock for dependency resolution.",
+            score: 5,
+            keywordScore: 4,
+            vectorScore: 0.6,
+            rerankScore: 1,
+            fetchedAt: "2026-05-14T10:00:00.000Z",
+            indexedAt: "2026-05-14T10:05:00.000Z",
+            contentHash: "chunk-lockfile"
+          }
+        : {
+            chunkId: 1,
+            pageId: 10,
+            title: "TypeScript",
+            url: "https://bun.com/docs/runtime/typescript",
+            headingPath: ["Runtime", "TypeScript"],
+            snippet: "Install @types/bun and set types to bun for Bun TypeScript projects.",
+            score: 4,
+            keywordScore: 3,
+            vectorScore: 0.7,
+            rerankScore: 1,
+            fetchedAt: "2026-05-14T10:00:00.000Z",
+            indexedAt: "2026-05-14T10:05:00.000Z",
+            contentHash: "chunk-typescript"
+          }
+    ],
+    freshness: "fresh",
+    confidence: "high",
+    lowConfidence: false,
+    refreshQueued: false,
+    retrieval: {
+      mode: "hybrid",
+      keywordAttempted: true,
+      vectorAttempted: true,
+      keywordResultCount: 1,
+      vectorResultCount: 1,
+      mergedResultCount: 1,
+      queryHash: packageManagerBoost ? "lockfile-hash" : "typescript-hash"
+    },
+    warnings: []
+  };
 }
 
-function createAdapter(fetchImpl: FetchLike, store = createStore()): BunDocsSearchAdapter {
-  return new BunDocsSearchAdapter({
-    cache: store,
-    fetchClient: new SourceFetchClient({
-      fetchImpl,
-      now: () => "2026-05-12T10:00:00.000Z"
-    }),
-    now: () => "2026-05-12T10:00:00.000Z"
-  });
-}
+class StubDocsRetrieval {
+  readonly calls: DocsRetrievalInput[] = [];
+  lowConfidence = false;
 
-afterEach(() => {
-  for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
+  async search(input: DocsRetrievalInput): Promise<DocsRetrievalResult> {
+    this.calls.push(input);
+    const result = docsResult(input);
+
+    if (!this.lowConfidence) {
+      return result;
+    }
+
+    return {
+      ...result,
+      results: [],
+      freshness: "missing",
+      confidence: "low",
+      lowConfidence: true,
+      refreshReason: "missing_content",
+      retrieval: {
+        ...result.retrieval,
+        keywordResultCount: 0,
+        vectorResultCount: 0,
+        mergedResultCount: 0
+      },
+      warnings: [{ code: "no_results", message: "No indexed documentation evidence matched the query." }]
+    };
   }
-});
+}
 
-describe("search_bun_docs tool", () => {
-  test("TypeScript query returns TypeScript docs result from mocked docs", async () => {
+function dependencies(retrieval: StubDocsRetrieval) {
+  return {
+    retrieval,
+    sourceRegistry: defaultDocsSourceRegistry,
+    now: () => generatedAt,
+    defaultLimit: 5,
+    maxLimit: 20
+  };
+}
+
+describe("search_bun_docs compatibility wrapper", () => {
+  test("TypeScript query delegates to docs retrieval and returns Bun result", async () => {
+    const retrieval = new StubDocsRetrieval();
     const result = await searchBunDocs(
       { query: "typescript types bun", topic: "typescript" },
-      { adapter: createAdapter(async () => new Response(mockedDocs, { status: 200 })) }
+      dependencies(retrieval)
     );
 
     expect(result.ok).toBe(true);
-
-    if (result.ok) {
-      expect(result.results[0]?.title).toBe("TypeScript");
-      expect(result.sources[0]?.url).toBe("https://bun.com/docs/runtime/typescript");
-      expect(result.cacheStatus).toBe("fresh");
+    if (!result.ok) {
+      throw new Error("Expected search_bun_docs success.");
     }
+    expect(retrieval.calls[0]).toMatchObject({
+      sourceId: "bun",
+      mode: "hybrid",
+      limit: 5
+    });
+    expect(retrieval.calls[0]?.query).toContain("@types/bun");
+    expect(result.query).toBe("typescript types bun");
+    expect(result.results[0]).toMatchObject({
+      title: "TypeScript",
+      url: "https://bun.com/docs/runtime/typescript",
+      relevanceScore: 4
+    });
+    expect(result.sources[0]?.url).toBe("https://bun.com/docs/runtime/typescript");
+    expect(result.freshness).toBe("fresh");
   });
 
-  test("lockfile query returns lockfile docs result from mocked docs", async () => {
+  test("topic boost affects deterministic ranking", async () => {
+    const retrieval = new StubDocsRetrieval();
     const result = await searchBunDocs(
-      { query: "bun.lockb lockfile", topic: "package-manager" },
-      { adapter: createAdapter(async () => new Response(mockedDocs, { status: 200 })) }
+      { query: "dependency resolution", topic: "package-manager" },
+      dependencies(retrieval)
     );
 
     expect(result.ok).toBe(true);
-
-    if (result.ok) {
-      expect(result.results[0]?.title).toBe("Lockfile");
+    if (!result.ok) {
+      throw new Error("Expected search_bun_docs success.");
     }
+    expect(retrieval.calls[0]?.query).toContain("bun.lock");
+    expect(result.results[0]?.title).toBe("Lockfile");
   });
 
   test("invalid topic fails validation", async () => {
     const result = await searchBunDocs(
       { query: "typescript", topic: "invalid-topic" },
-      { adapter: createAdapter(async () => new Response(mockedDocs, { status: 200 })) }
+      dependencies(new StubDocsRetrieval())
     );
 
     expect(result.ok).toBe(false);
-
     if (!result.ok) {
       expect(result.error.code).toBe("invalid_input");
     }
   });
 
-  test("network failure plus stale cache returns stale result with warning", async () => {
-    const store = createStore();
-    store.set({
-      key: BUN_DOCS_FULL_URL,
-      sourceType: "bun-docs",
-      sourceUrl: BUN_DOCS_FULL_URL,
-      content: mockedDocs,
-      fetchedAt: "2026-05-12T08:00:00.000Z",
-      expiresAt: "2026-05-12T09:00:00.000Z",
-      status: "200"
-    });
-
-    const result = await searchBunDocs(
-      { query: "bun.lock" },
-      {
-        adapter: createAdapter(
-          async () => {
-            throw new Error("network unavailable");
-          },
-          store
-        )
-      }
-    );
+  test("low-confidence result includes warning", async () => {
+    const retrieval = new StubDocsRetrieval();
+    retrieval.lowConfidence = true;
+    const result = await searchBunDocs({ query: "no indexed evidence" }, dependencies(retrieval));
 
     expect(result.ok).toBe(true);
-
-    if (result.ok) {
-      expect(result.cacheStatus).toBe("stale");
-      expect(result.warnings).toHaveLength(1);
-      expect(result.results[0]?.title).toBe("Lockfile");
+    if (!result.ok) {
+      throw new Error("Expected low-confidence success response.");
     }
-
-    store.close();
+    expect(result.confidence).toBe("low");
+    expect(result.freshness).toBe("missing");
+    expect(result.warnings.map((warning) => warning.id)).toContain("no_results");
   });
 
-  test("no cache plus fetch failure returns structured error", async () => {
-    const result = await searchBunDocs(
-      { query: "typescript" },
-      {
-        adapter: createAdapter(async () => {
-          throw new Error("network unavailable");
-        })
-      }
-    );
+  test("result includes hybrid retrieval metadata", async () => {
+    const result = await searchBunDocs({ query: "typescript" }, dependencies(new StubDocsRetrieval()));
 
-    expect(result.ok).toBe(false);
-
+    expect(result.ok).toBe(true);
     if (!result.ok) {
-      expect(result.error.code).toBe("no_evidence");
+      throw new Error("Expected search_bun_docs success.");
     }
+    expect(result.retrieval).toMatchObject({
+      mode: "hybrid",
+      keywordAttempted: true,
+      vectorAttempted: true,
+      mergedResultCount: 1
+    });
+    expect(result.refreshQueued).toBe(false);
   });
 });

@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SqliteCacheStore } from "../../src/cache/sqlite-cache";
 import { BUN_DOCS_INDEX_URL, BunDocsIndexAdapter } from "../../src/sources/bun-docs-index";
-import { BUN_DOCS_FULL_URL, BunDocsSearchAdapter } from "../../src/sources/bun-docs-search";
+import { BUN_DOCS_FULL_URL } from "../../src/sources/bun-docs-search";
 import { NpmRegistryAdapter, npmRegistryPackageUrl } from "../../src/sources/npm-registry";
 import { SourceFetchClient, type FetchLike } from "../../src/sources/fetch-client";
 import { analyzeBunProject } from "../../src/tools/analyze-bun-project";
@@ -13,6 +13,8 @@ import { searchBunDocs } from "../../src/tools/search-bun-docs";
 import { planBunDependency } from "../../src/tools/plan-bun-dependency";
 import { reviewBunProject } from "../../src/tools/review-bun-project";
 import type { Recommendation } from "../../src/shared/contracts";
+import { defaultDocsSourceRegistry } from "../../src/docs/sources/bun-source-pack";
+import type { DocsRetrievalInput, DocsRetrievalResult } from "../../src/docs/retrieval/hybrid-retrieval";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const fixturesDir = resolve(testDir, "../fixtures/projects");
@@ -106,11 +108,45 @@ describe("Bun Dev Intelligence offline flow", () => {
       fetchImpl: createFetch(),
       now: () => now
     });
-    const docsSearchAdapter = new BunDocsSearchAdapter({
-      cache: store,
-      fetchClient,
-      now: () => now
-    });
+    const docsRetrieval = {
+      search: async (input: DocsRetrievalInput): Promise<DocsRetrievalResult> => ({
+        query: input.query,
+        sourceId: "bun",
+        mode: "hybrid",
+        limit: input.limit ?? 5,
+        results: [
+          {
+            chunkId: 1,
+            pageId: 1,
+            title: "TypeScript",
+            url: "https://bun.com/docs/runtime/typescript",
+            headingPath: ["Runtime", "TypeScript"],
+            snippet: "Install @types/bun and use compilerOptions.types bun.",
+            score: 4,
+            keywordScore: 3,
+            vectorScore: 0.7,
+            rerankScore: 1,
+            fetchedAt: now,
+            indexedAt: now,
+            contentHash: "typescript-chunk"
+          }
+        ],
+        freshness: "fresh",
+        confidence: "high",
+        lowConfidence: false,
+        refreshQueued: false,
+        retrieval: {
+          mode: "hybrid",
+          keywordAttempted: true,
+          vectorAttempted: true,
+          keywordResultCount: 1,
+          vectorResultCount: 1,
+          mergedResultCount: 1,
+          queryHash: "e2e-hash"
+        },
+        warnings: []
+      })
+    };
     const docsIndexAdapter = new BunDocsIndexAdapter({
       cache: store,
       fetchClient,
@@ -142,7 +178,13 @@ describe("Bun Dev Intelligence offline flow", () => {
 
     const docs = await searchBunDocs(
       { query: "typescript types bun", topic: "typescript" },
-      { adapter: docsSearchAdapter }
+      {
+        retrieval: docsRetrieval,
+        sourceRegistry: defaultDocsSourceRegistry,
+        now: () => now,
+        defaultLimit: 5,
+        maxLimit: 20
+      }
     );
     expect(docs.ok).toBe(true);
 
