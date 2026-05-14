@@ -47,14 +47,14 @@ Commit message requirement:
 - Started: n/a
 - Planned validation: n/a
 - Commit intent: n/a
-- Notes: Task 00 implementation complete. Validation: `bun test tests/integration/storage/docs-storage.test.ts` pass; `bun test tests/integration/docs/ingestion/ingestion-pipeline.test.ts` pass; `bun run typecheck` pass; `bun run check` pass. Database-backed tests skipped because `TEST_DATABASE_URL` is not set.
+- Notes: Task 01 implementation complete. Validation: `bun test tests/integration/docs/refresh/docs-worker.test.ts` pass; `bun run typecheck` pass; `bun run check` pass.
 
 ## Task Status
 
 | Task | Title | Status | Task File |
 | --- | --- | --- | --- |
 | 00 | Make embedding storage idempotent | done | [00](00-idempotent-embedding-storage.md) |
-| 01 | Mark jobs failed when execution throws | todo | [01](01-worker-exception-handling.md) |
+| 01 | Mark jobs failed when execution throws | done | [01](01-worker-exception-handling.md) |
 | 02 | Recover stale running jobs | todo | [02](02-stale-running-job-recovery.md) |
 | 03 | Add source-level job exclusivity | todo | [03](03-source-level-job-exclusivity.md) |
 | 04 | Improve worker logs and deployment docs | todo | [04](04-worker-logging-and-deployment-docs.md) |
@@ -67,3 +67,5 @@ Commit message requirement:
 | 2026-05-14 | Planning | done | Split worker reliability PRD into scoped task files and initialized tracker. No implementation started. |
 | 2026-05-14 | 00 | in_progress | Started idempotent embedding storage; planned storage, ingestion, typecheck, and check validation. |
 | 2026-05-14 | 00 | done | Implemented idempotent embedding insert with existing-row compatibility validation. Validation passed; DB-backed tests skipped without `TEST_DATABASE_URL`. |
+| 2026-05-14 | 01 | in_progress | Started per-job exception handling; planned worker refresh tests, typecheck, and check validation. |
+| 2026-05-14 | 01 | done | Wrapped per-job execution exceptions into sanitized failed-job results and verified continuation after throws. Validation passed. |

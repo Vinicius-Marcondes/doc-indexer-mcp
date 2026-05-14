@@ -166,6 +166,14 @@ function missingUrlError(job: RefreshWorkerJob): StructuredError {
   });
 }
 
+function unexpectedJobExecutionError(job: RefreshWorkerJob): StructuredError {
+  return createStructuredError("internal_error", "Docs refresh job failed unexpectedly.", {
+    jobId: job.id,
+    sourceId: job.sourceId,
+    jobType: job.jobType
+  });
+}
+
 function normalizeLimit(value: number): number {
   if (!Number.isFinite(value)) {
     return 1;
@@ -265,7 +273,17 @@ export class DocsRefreshWorker {
     let failed = 0;
 
     await runWithConcurrency(jobs, this.maxConcurrency, async (job) => {
-      const result = await this.executeJob(job);
+      let result: DocsRefreshExecutionResult;
+
+      try {
+        result = await this.executeJob(job);
+      } catch {
+        result = {
+          ok: false,
+          error: unexpectedJobExecutionError(job)
+        };
+      }
+
       const finishedAt = this.now();
 
       if (result.ok) {

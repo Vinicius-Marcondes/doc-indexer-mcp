@@ -138,13 +138,20 @@ class FakeExecutor implements DocsRefreshJobExecutor {
   maxActive = 0;
   private active = 0;
 
-  constructor(private readonly failJobTypes = new Set<RefreshJobType>()) {}
+  constructor(
+    private readonly failJobTypes = new Set<RefreshJobType>(),
+    private readonly throwJobTypes = new Set<RefreshJobType>()
+  ) {}
 
   private async run(jobType: RefreshJobType): Promise<{ ok: true } | { ok: false; error: ReturnType<typeof createStructuredError> }> {
     this.active += 1;
     this.maxActive = Math.max(this.maxActive, this.active);
     await new Promise((resolve) => setTimeout(resolve, 1));
     this.active -= 1;
+
+    if (this.throwJobTypes.has(jobType)) {
+      throw new Error(`Unexpected refresh failure with Authorization: Bearer secret-token and full page content for ${jobType}.`);
+    }
 
     if (this.failJobTypes.has(jobType)) {
       return {
@@ -211,6 +218,22 @@ function createWorker(options: {
   };
 }
 
+function parseLastError(job: MutableWorkerJob | undefined): {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+} {
+  if (job?.lastError === undefined || job.lastError === null) {
+    throw new Error("Expected job last_error.");
+  }
+
+  return JSON.parse(job.lastError) as {
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+  };
+}
+
 describe("docs refresh worker", () => {
   test("worker command imports without side effects", async () => {
     const module = await import("../../../../src/docs-worker");
@@ -272,6 +295,49 @@ describe("docs refresh worker", () => {
     expect(result.failed).toBe(1);
     expect(failed?.status).toBe("failed");
     expect(failed?.lastError).toContain("fetch_failed");
+  });
+
+  test("worker marks thrown execution error failed with sanitized structured last_error", async () => {
+    const executor = new FakeExecutor(new Set(), new Set(["page"]));
+    const { store, worker } = createWorker({ executor });
+    const job = store.seed({ url: pageUrl, jobType: "page", reason: "missing_content" });
+
+    const result = await worker.runOnce();
+    const failed = store.jobs.find((item) => item.id === job.id);
+    const lastError = parseLastError(failed);
+
+    expect(result.processed).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(failed?.status).toBe("failed");
+    expect(lastError).toEqual({
+      code: "internal_error",
+      message: "Docs refresh job failed unexpectedly.",
+      details: {
+        jobId: job.id,
+        sourceId: "bun",
+        jobType: "page"
+      }
+    });
+    expect(failed?.lastError).not.toContain("secret-token");
+    expect(failed?.lastError).not.toContain("Authorization");
+    expect(failed?.lastError).not.toContain("full page content");
+    expect(failed?.lastError).not.toContain("Error:");
+  });
+
+  test("worker continues after one claimed job throws", async () => {
+    const executor = new FakeExecutor(new Set(), new Set(["page"]));
+    const { store, worker } = createWorker({ executor, maxJobsPerRun: 2, maxConcurrency: 1 });
+    const failedJob = store.seed({ url: "https://bun.com/docs/runtime/http-server", jobType: "page" });
+    const succeededJob = store.seed({ url: "https://bun.com/docs/runtime/typescript", jobType: "embedding" });
+
+    const result = await worker.runOnce();
+
+    expect(result.processed).toBe(2);
+    expect(result.failed).toBe(1);
+    expect(result.succeeded).toBe(1);
+    expect(store.jobs.find((job) => job.id === failedJob.id)?.status).toBe("failed");
+    expect(store.jobs.find((job) => job.id === succeededJob.id)?.status).toBe("succeeded");
+    expect(executor.embeddingCalls).toEqual(["bun:https://bun.com/docs/runtime/typescript"]);
   });
 
   test("worker respects max jobs per run", async () => {
