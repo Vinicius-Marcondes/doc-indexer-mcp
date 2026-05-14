@@ -40,14 +40,14 @@ Commit message requirement:
 
 ## Current Task
 
-- Task ID: None
-- Title: None
-- Owner: None
-- Status: idle
-- Started: None
-- Planned validation: None
-- Commit intent: None
-- Notes: Task 19 is complete and ready to commit.
+- Task ID: 20
+- Title: Add refresh job queue, dedupe, and priority scoring
+- Owner: Codex
+- Status: done
+- Started: 2026-05-14
+- Planned validation: complete
+- Commit intent: Add bounded refresh job queue service with allowlist policy checks, dedupe, priority scoring, recent-failure delay, queue bounds, and storage helpers.
+- Notes: Focused validation pass: `bun test tests/integration/docs/refresh/refresh-queue.test.ts`; `bun test tests/integration/storage/docs-storage.test.ts`; `bun run typecheck`. Final gates pass: `bun test` (391 pass, 17 skip); `bun run typecheck`; `bun run check` (391 pass, 17 skip). Scope excludes worker execution, actual refresh processing, and admin tools.
 
 ## Task Status
 
@@ -73,7 +73,7 @@ Commit message requirement:
 | 17 | Implement `search_docs` MCP tool | done | [17](17-search-docs-tool.md) |
 | 18 | Implement `get_doc_page` and docs resources | done | [18](18-get-doc-page-and-doc-resources.md) |
 | 19 | Migrate `search_bun_docs` to docs retrieval compatibility wrapper | done | [19](19-search-bun-docs-compatibility.md) |
-| 20 | Add refresh job queue, dedupe, and priority scoring | todo | [20](20-refresh-job-queue-and-priority.md) |
+| 20 | Add refresh job queue, dedupe, and priority scoring | done | [20](20-refresh-job-queue-and-priority.md) |
 | 21 | Implement docs worker scheduled and on-demand refresh | todo | [21](21-docs-worker-scheduled-and-demand-refresh.md) |
 | 22 | Implement stale content and tombstone policy | todo | [22](22-tombstone-stale-policy.md) |
 | 23 | Add Docker and deployment configuration | todo | [23](23-docker-compose-deployment.md) |
@@ -124,3 +124,5 @@ Commit message requirement:
 | 2026-05-14 | 18 | done | Added `get_doc_page`, DB-backed stored page/chunk read helpers, and read-only `docs://sources`, `docs://page/{sourceId}/{pageId}`, and `docs://chunk/{sourceId}/{chunkId}` resources with source/id validation and freshness metadata. Focused tool/resource/MCP/storage tests pass; `bun run typecheck` pass; `bun run check` pass (383 pass, 17 skipped). |
 | 2026-05-14 | 19 | in_progress | Started `search_bun_docs` compatibility task; will add failing wrapper/delegation tests before implementation. |
 | 2026-05-14 | 19 | done | Routed `search_bun_docs` through the generic `search_docs` retrieval path with Bun source defaults, topic query boosts, compatibility result fields, freshness/retrieval metadata, and wrapper regression tests. Focused wrapper/generic/e2e/audit tests pass; `bun run typecheck` pass; `bun run check` pass (384 pass, 17 skipped). |
+| 2026-05-14 | 20 | in_progress | Started refresh queue task; will add failing enqueue/dedupe/priority/bounds tests before implementation. |
+| 2026-05-14 | 20 | done | Added bounded refresh job queue with allowlist policy rejection, pending/running dedupe, priority scoring, recent-failure delay, queue bounds, and storage helpers. Focused refresh/storage tests pass; `bun run typecheck` pass; `bun run check` pass (391 pass, 17 skipped). |

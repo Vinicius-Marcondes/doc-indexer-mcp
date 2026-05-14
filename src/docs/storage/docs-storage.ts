@@ -93,7 +93,12 @@ export type RefreshJobReason = "scheduled" | "missing_content" | "stale_content"
 export interface RefreshJob {
   readonly id: number;
   readonly sourceId: string;
+  readonly url: string | null;
+  readonly jobType: RefreshJobType;
+  readonly reason: RefreshJobReason;
   readonly status: string;
+  readonly priority: number;
+  readonly runAfter: string;
 }
 
 export interface CreateRefreshJobInput {
@@ -102,6 +107,7 @@ export interface CreateRefreshJobInput {
   readonly jobType: RefreshJobType;
   readonly reason: RefreshJobReason;
   readonly priority: number;
+  readonly runAfter?: string;
 }
 
 export type RetrievalMode = "hybrid" | "keyword" | "semantic";
@@ -206,7 +212,12 @@ interface EmbeddingRow extends Record<string, unknown> {
 interface RefreshJobRow extends Record<string, unknown> {
   readonly id: number;
   readonly source_id: string;
+  readonly url: string | null;
+  readonly job_type: RefreshJobType;
+  readonly reason: RefreshJobReason;
   readonly status: string;
+  readonly priority: number;
+  readonly run_after: string;
 }
 
 interface RetrievalEventRow extends Record<string, unknown> {
@@ -332,7 +343,12 @@ function mapRefreshJob(row: RefreshJobRow): RefreshJob {
   return {
     id: row.id,
     sourceId: row.source_id,
-    status: row.status
+    url: row.url,
+    jobType: row.job_type,
+    reason: row.reason,
+    status: row.status,
+    priority: row.priority,
+    runAfter: toIsoString(row.run_after) ?? row.run_after
   };
 }
 
@@ -622,12 +638,62 @@ export class RemoteDocsStorage {
 
   async createRefreshJob(input: CreateRefreshJobInput): Promise<RefreshJob> {
     const rows = await this.sql<RefreshJobRow[]>`
-      insert into doc_refresh_jobs (source_id, url, job_type, reason, priority)
-      values (${input.sourceId}, ${input.url ?? null}, ${input.jobType}, ${input.reason}, ${input.priority})
-      returning id, source_id, status
+      insert into doc_refresh_jobs (source_id, url, job_type, reason, priority, run_after)
+      values (${input.sourceId}, ${input.url ?? null}, ${input.jobType}, ${input.reason}, ${input.priority}, ${input.runAfter ?? new Date().toISOString()})
+      returning id, source_id, url, job_type, reason, status, priority, run_after::text as run_after
     `;
 
     return mapRefreshJob(requiredRow(rows, "createRefreshJob"));
+  }
+
+  async findPendingRefreshJob(input: {
+    readonly sourceId: string;
+    readonly url?: string;
+    readonly jobType: RefreshJobType;
+  }): Promise<RefreshJob | null> {
+    const rows = await this.sql<RefreshJobRow[]>`
+      select id, source_id, url, job_type, reason, status, priority, run_after::text as run_after
+      from doc_refresh_jobs
+      where source_id = ${input.sourceId}
+        and coalesce(url, '') = coalesce(${input.url ?? null}, '')
+        and job_type = ${input.jobType}
+        and status in ('queued', 'running')
+      order by priority desc, created_at asc
+      limit 1
+    `;
+
+    return rows[0] === undefined ? null : mapRefreshJob(rows[0]);
+  }
+
+  async countPendingRefreshJobs(input: { readonly sourceId?: string } = {}): Promise<number> {
+    const rows = await this.sql<Array<{ count: number }>>`
+      select count(*)::integer as count
+      from doc_refresh_jobs
+      where status in ('queued', 'running')
+        and (${input.sourceId ?? null}::text is null or source_id = ${input.sourceId ?? null})
+    `;
+
+    return Number(rows[0]?.count ?? 0);
+  }
+
+  async updateRefreshJobStatus(input: {
+    readonly id: number;
+    readonly status: "queued" | "running" | "succeeded" | "failed";
+    readonly lastError?: string;
+  }): Promise<RefreshJob> {
+    const rows = await this.sql<RefreshJobRow[]>`
+      update doc_refresh_jobs
+      set
+        status = ${input.status},
+        last_error = ${input.lastError ?? null},
+        updated_at = now(),
+        started_at = case when ${input.status} = 'running' then now() else started_at end,
+        finished_at = case when ${input.status} in ('succeeded', 'failed') then now() else finished_at end
+      where id = ${input.id}
+      returning id, source_id, url, job_type, reason, status, priority, run_after::text as run_after
+    `;
+
+    return mapRefreshJob(requiredRow(rows, "updateRefreshJobStatus"));
   }
 
   async recordRetrievalEvent(input: RecordRetrievalEventInput): Promise<RetrievalEvent> {
