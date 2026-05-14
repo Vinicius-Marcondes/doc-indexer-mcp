@@ -162,11 +162,43 @@ function structuredErrorText(error: StructuredError): string {
 
 function sanitizeLogField(value: string): string {
   const redacted = value
-    .replace(/Authorization\s*:\s*Bearer\s+[^\s"']+/giu, "Authorization: Bearer [redacted]")
+    .replace(/Authorization\s*:\s*Bearer\s+[^\s"']+/giu, "[redacted authorization]")
     .replace(/Bearer\s+[^\s"']+/giu, "Bearer [redacted]")
     .replace(/sk-[A-Za-z0-9_-]+/gu, "[redacted]");
 
   return redacted.length > 200 ? `${redacted.slice(0, 197)}...` : redacted;
+}
+
+function sanitizeCauseMessage(value: string): string {
+  return sanitizeLogField(
+    value.replace(
+      /\b(?:(?:full|raw)\s+)?(?:page|request|response|source|document)\s+(?:content|payload|body)\b|\b(?:full|raw)\s+(?:content|payload|body)\b/giu,
+      "[redacted content]"
+    )
+  );
+}
+
+function errorCauseDetails(error: unknown): { readonly causeName: string; readonly causeMessage?: string } {
+  if (error instanceof Error) {
+    const causeName = sanitizeLogField(error.name.length > 0 ? error.name : "Error");
+    const causeMessage = sanitizeCauseMessage(error.message);
+
+    return {
+      causeName,
+      ...(causeMessage.length === 0 ? {} : { causeMessage })
+    };
+  }
+
+  if (typeof error === "string") {
+    return {
+      causeName: "ThrownString",
+      causeMessage: sanitizeCauseMessage(error)
+    };
+  }
+
+  return {
+    causeName: "ThrownNonError"
+  };
 }
 
 export function formatDocsWorkerJobFailureLog(input: {
@@ -176,10 +208,16 @@ export function formatDocsWorkerJobFailureLog(input: {
   readonly status: "failed";
   readonly code: string;
   readonly message: string;
+  readonly causeName?: string;
+  readonly causeMessage?: string;
 }): string {
+  const causeName = input.causeName === undefined ? "" : ` causeName=${sanitizeLogField(input.causeName)}`;
+  const causeMessage =
+    input.causeMessage === undefined ? "" : ` causeMessage=${JSON.stringify(sanitizeCauseMessage(input.causeMessage))}`;
+
   return (
     `bun-dev-intel-mcp docs worker job failed id=${input.id} source=${input.sourceId} type=${input.jobType} ` +
-    `status=${input.status} code=${input.code} message=${JSON.stringify(sanitizeLogField(input.message))}`
+    `status=${input.status} code=${input.code} message=${JSON.stringify(sanitizeLogField(input.message))}${causeName}${causeMessage}`
   );
 }
 
@@ -216,11 +254,14 @@ function missingUrlError(job: RefreshWorkerJob): StructuredError {
   });
 }
 
-function unexpectedJobExecutionError(job: RefreshWorkerJob): StructuredError {
+function unexpectedJobExecutionError(job: RefreshWorkerJob, error: unknown): StructuredError {
+  const cause = errorCauseDetails(error);
+
   return createStructuredError("internal_error", "Docs refresh job failed unexpectedly.", {
     jobId: job.id,
     sourceId: job.sourceId,
-    jobType: job.jobType
+    jobType: job.jobType,
+    ...cause
   });
 }
 
@@ -378,10 +419,10 @@ export class DocsRefreshWorker {
 
       try {
         result = await this.executeJob(job);
-      } catch {
+      } catch (error) {
         result = {
           ok: false,
-          error: unexpectedJobExecutionError(job)
+          error: unexpectedJobExecutionError(job, error)
         };
       }
 
@@ -410,7 +451,9 @@ export class DocsRefreshWorker {
           jobType: job.jobType,
           status: "failed",
           code: result.error.code,
-          message: result.error.message
+          message: result.error.message,
+          ...(typeof result.error.details?.causeName === "string" ? { causeName: result.error.details.causeName } : {}),
+          ...(typeof result.error.details?.causeMessage === "string" ? { causeMessage: result.error.details.causeMessage } : {})
         })
       );
 

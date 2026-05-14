@@ -421,7 +421,9 @@ describe("docs refresh worker", () => {
       details: {
         jobId: job.id,
         sourceId: "bun",
-        jobType: "page"
+        jobType: "page",
+        causeName: "Error",
+        causeMessage: "Unexpected refresh failure with [redacted authorization] and [redacted content] for page."
       }
     });
     expect(failed?.lastError).not.toContain("secret-token");
@@ -440,7 +442,10 @@ describe("docs refresh worker", () => {
 
     expect(captured.logs).toContainEqual({
       level: "error",
-      message: `bun-dev-intel-mcp docs worker job failed id=${job.id} source=bun type=page status=failed code=internal_error message="Docs refresh job failed unexpectedly."`
+      message:
+        `bun-dev-intel-mcp docs worker job failed id=${job.id} source=bun type=page status=failed ` +
+        `code=internal_error message="Docs refresh job failed unexpectedly." causeName=Error ` +
+        `causeMessage="Unexpected refresh failure with [redacted authorization] and [redacted content] for page."`
     });
 
     const serialized = JSON.stringify(captured.logs);
