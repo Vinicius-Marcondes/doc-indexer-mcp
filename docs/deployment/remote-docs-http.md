@@ -112,6 +112,58 @@ Before claiming queued jobs, the worker marks stale `running` jobs as failed. `D
 
 On-demand refresh can be queued by docs tools when content is missing, stale, or low confidence. These jobs are bounded, deduplicated by source/URL/job type, and processed by `bun src/docs-worker.ts`. Search returns the best available cited evidence promptly and reports `refreshQueued`.
 
+## Monitoring
+
+The worker writes one safe line for each failed job with the job id, source id, job type, status, structured error code, and sanitized message. Recovery passes log how many stale `running` jobs were marked failed. The worker container can be `Up` while sleeping between cycles; use logs and database counts to confirm recent activity.
+
+Job status counts:
+
+```sql
+select status, count(*)::int
+from doc_refresh_jobs
+group by status
+order by status;
+```
+
+Stale running jobs:
+
+```sql
+select id, source_id, job_type, attempt_count, started_at, updated_at
+from doc_refresh_jobs
+where status = 'running'
+  and coalesce(started_at, updated_at) < now() - make_interval(secs => 1800)
+order by coalesce(started_at, updated_at);
+```
+
+Content and embedding counts:
+
+```sql
+select
+  (select count(*)::int from doc_pages where tombstoned_at is null) as doc_pages,
+  (select count(*)::int from doc_chunks) as doc_chunks,
+  (select count(*)::int from doc_embeddings) as doc_embeddings;
+```
+
+Missing embeddings:
+
+```sql
+select count(*)::int as chunks_without_embeddings
+from doc_chunks c
+left join doc_embeddings e on e.chunk_id = c.id
+where e.id is null;
+```
+
+Embedding model/version:
+
+```sql
+select provider, model, embedding_version, dimensions, count(*)::int
+from doc_embeddings
+group by provider, model, embedding_version, dimensions
+order by provider, model, embedding_version;
+```
+
+`DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS` should match the stale running query threshold. The default is 1800 seconds.
+
 ## Source Policy
 
 V1 indexes only official Bun documentation:

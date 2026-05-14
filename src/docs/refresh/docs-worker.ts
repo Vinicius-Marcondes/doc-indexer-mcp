@@ -77,6 +77,7 @@ export interface DocsRefreshWorkerOptions {
   readonly queue: RefreshJobQueue;
   readonly executor: DocsRefreshJobExecutor;
   readonly sourceRegistry: DocsSourceRegistry;
+  readonly logger?: DocsRefreshWorkerLogger;
   readonly now: () => string;
   readonly refreshIntervalSeconds: number;
   readonly maxJobsPerRun: number;
@@ -91,6 +92,11 @@ export interface ScheduledRefreshResult {
   readonly enqueued: number;
   readonly deduplicated: number;
   readonly skipped: number;
+}
+
+export interface DocsRefreshWorkerLogger {
+  readonly info: (message: string) => void;
+  readonly error: (message: string) => void;
 }
 
 export interface DocsRefreshWorkerRunResult {
@@ -152,6 +158,33 @@ function structuredErrorText(error: StructuredError): string {
     message: error.message,
     details: error.details
   });
+}
+
+function sanitizeLogField(value: string): string {
+  const redacted = value
+    .replace(/Authorization\s*:\s*Bearer\s+[^\s"']+/giu, "Authorization: Bearer [redacted]")
+    .replace(/Bearer\s+[^\s"']+/giu, "Bearer [redacted]")
+    .replace(/sk-[A-Za-z0-9_-]+/gu, "[redacted]");
+
+  return redacted.length > 200 ? `${redacted.slice(0, 197)}...` : redacted;
+}
+
+export function formatDocsWorkerJobFailureLog(input: {
+  readonly id: number;
+  readonly sourceId: string;
+  readonly jobType: RefreshJobType;
+  readonly status: "failed";
+  readonly code: string;
+  readonly message: string;
+}): string {
+  return (
+    `bun-dev-intel-mcp docs worker job failed id=${input.id} source=${input.sourceId} type=${input.jobType} ` +
+    `status=${input.status} code=${input.code} message=${JSON.stringify(sanitizeLogField(input.message))}`
+  );
+}
+
+export function formatDocsWorkerRecoveryLog(input: { readonly staleRunningFailed: number }): string {
+  return `bun-dev-intel-mcp docs worker recovered stale running jobs count=${input.staleRunningFailed}`;
 }
 
 async function runWithConcurrency<T>(
@@ -244,6 +277,7 @@ export class DocsRefreshWorker {
   private readonly queue: RefreshJobQueue;
   private readonly executor: DocsRefreshJobExecutor;
   private readonly sourceRegistry: DocsSourceRegistry;
+  private readonly logger?: DocsRefreshWorkerLogger;
   private readonly now: () => string;
   private readonly refreshIntervalSeconds: number;
   private readonly maxJobsPerRun: number;
@@ -257,6 +291,7 @@ export class DocsRefreshWorker {
     this.queue = options.queue;
     this.executor = options.executor;
     this.sourceRegistry = options.sourceRegistry;
+    this.logger = options.logger;
     this.now = options.now;
     this.refreshIntervalSeconds = normalizeLimit(options.refreshIntervalSeconds);
     this.maxJobsPerRun = normalizeLimit(options.maxJobsPerRun);
@@ -368,6 +403,16 @@ export class DocsRefreshWorker {
         lastError: structuredErrorText(result.error),
         now: finishedAt
       });
+      this.logger?.error(
+        formatDocsWorkerJobFailureLog({
+          id: job.id,
+          sourceId: job.sourceId,
+          jobType: job.jobType,
+          status: "failed",
+          code: result.error.code,
+          message: result.error.message
+        })
+      );
 
       if (job.url !== null && hasTombstonePolicyStore(this.store)) {
         await recordTombstoneRefreshFailure({
@@ -436,10 +481,15 @@ export class DocsRefreshWorker {
       limit: this.maxJobsPerRun,
       timeoutSeconds: this.runningJobTimeoutSeconds
     });
-
-    return {
+    const result = {
       staleRunningFailed: recovered.length
     };
+
+    if (result.staleRunningFailed > 0) {
+      this.logger?.info(formatDocsWorkerRecoveryLog(result));
+    }
+
+    return result;
   }
 }
 

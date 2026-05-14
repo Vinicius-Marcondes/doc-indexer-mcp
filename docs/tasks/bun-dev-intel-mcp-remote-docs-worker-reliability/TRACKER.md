@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: n/a
 - Planned validation: n/a
 - Commit intent: n/a
-- Notes: Task 03 implementation complete. Validation: `bun test tests/integration/docs/refresh/docs-worker.test.ts` pass; `bun run typecheck` pass; `bun run check` pass.
+- Notes: Task 04 implementation complete. Validation: `bun test tests/integration/docs/refresh/docs-worker.test.ts` pass; `bun test tests/unit/deployment/remote-docs-handoff.test.ts tests/unit/deployment/docker-config.test.ts` pass; `bun run typecheck` pass; `bun run check` pass.
 
 ## Task Status
 
@@ -57,7 +57,7 @@ Commit message requirement:
 | 01 | Mark jobs failed when execution throws | done | [01](01-worker-exception-handling.md) |
 | 02 | Recover stale running jobs | done | [02](02-stale-running-job-recovery.md) |
 | 03 | Add source-level job exclusivity | done | [03](03-source-level-job-exclusivity.md) |
-| 04 | Improve worker logs and deployment docs | todo | [04](04-worker-logging-and-deployment-docs.md) |
+| 04 | Improve worker logs and deployment docs | done | [04](04-worker-logging-and-deployment-docs.md) |
 | 05 | Final QA and traceability | todo | [05](05-final-qa-traceability.md) |
 
 ## Work Log
@@ -73,3 +73,5 @@ Commit message requirement:
 | 2026-05-14 | 02 | done | Added timeout config, bounded stale running job recovery before claim, recovery stats, and env/deployment docs. Validation passed. |
 | 2026-05-14 | 03 | in_progress | Started source-level exclusivity; planned worker refresh tests, typecheck, and check validation. |
 | 2026-05-14 | 03 | done | Added source-level broad-job exclusivity and requeued skipped same-source jobs. Validation passed. |
+| 2026-05-14 | 04 | in_progress | Started safe worker logging and deployment monitoring docs; planned worker, deployment docs, typecheck, and check validation. |
+| 2026-05-14 | 04 | done | Added sanitized job failure and stale recovery logs plus deployment monitoring SQL. Validation passed. |

@@ -243,6 +243,10 @@ function createWorker(options: {
   store?: InMemoryWorkerStore;
   executor?: FakeExecutor;
   sourceRegistry?: DocsSourceRegistry;
+  logger?: {
+    readonly info: (message: string) => void;
+    readonly error: (message: string) => void;
+  };
   maxJobsPerRun?: number;
   maxConcurrency?: number;
   runningJobTimeoutSeconds?: number;
@@ -272,7 +276,8 @@ function createWorker(options: {
       maxPagesPerRun: 500,
       maxEmbeddingsPerRun: 2000,
       maxConcurrency: options.maxConcurrency ?? 4,
-      runningJobTimeoutSeconds: options.runningJobTimeoutSeconds ?? 1800
+      runningJobTimeoutSeconds: options.runningJobTimeoutSeconds ?? 1800,
+      ...(options.logger === undefined ? {} : { logger: options.logger })
     })
   };
 }
@@ -314,6 +319,24 @@ function parseLastError(job: MutableWorkerJob | undefined): {
     code: string;
     message: string;
     details?: Record<string, unknown>;
+  };
+}
+
+function captureLogger(): {
+  readonly logs: Array<{ readonly level: "info" | "error"; readonly message: string }>;
+  readonly logger: {
+    readonly info: (message: string) => void;
+    readonly error: (message: string) => void;
+  };
+} {
+  const logs: Array<{ readonly level: "info" | "error"; readonly message: string }> = [];
+
+  return {
+    logs,
+    logger: {
+      info: (message) => logs.push({ level: "info", message }),
+      error: (message) => logs.push({ level: "error", message })
+    }
   };
 }
 
@@ -407,6 +430,26 @@ describe("docs refresh worker", () => {
     expect(failed?.lastError).not.toContain("Error:");
   });
 
+  test("worker logs sanitized job failure details", async () => {
+    const captured = captureLogger();
+    const executor = new FakeExecutor(new Set(), new Set(["page"]));
+    const { store, worker } = createWorker({ executor, logger: captured.logger });
+    const job = store.seed({ url: pageUrl, jobType: "page", reason: "missing_content" });
+
+    await worker.runOnce();
+
+    expect(captured.logs).toContainEqual({
+      level: "error",
+      message: `bun-dev-intel-mcp docs worker job failed id=${job.id} source=bun type=page status=failed code=internal_error message="Docs refresh job failed unexpectedly."`
+    });
+
+    const serialized = JSON.stringify(captured.logs);
+    expect(serialized).not.toContain("secret-token");
+    expect(serialized).not.toContain("Authorization");
+    expect(serialized).not.toContain("full page content");
+    expect(serialized).not.toContain("Error:");
+  });
+
   test("worker continues after one claimed job throws", async () => {
     const executor = new FakeExecutor(new Set(), new Set(["page"]));
     const { store, worker } = createWorker({ executor, maxJobsPerRun: 2, maxConcurrency: 1 });
@@ -458,6 +501,26 @@ describe("docs refresh worker", () => {
       startedAt: "2026-05-14T11:00:00.000Z",
       timeoutSeconds: 1800,
       ageSeconds: 3600
+    });
+  });
+
+  test("worker logs stale running job recovery count", async () => {
+    const captured = captureLogger();
+    const { store, worker } = createWorker({ logger: captured.logger, runningJobTimeoutSeconds: 1800 });
+    store.seed({
+      url: "https://bun.com/docs/runtime/http-server",
+      jobType: "page",
+      status: "running",
+      createdAt: "2026-05-14T11:00:00.000Z",
+      startedAt: "2026-05-14T11:00:00.000Z",
+      attemptCount: 2
+    });
+
+    await worker.runOnce();
+
+    expect(captured.logs).toContainEqual({
+      level: "info",
+      message: "bun-dev-intel-mcp docs worker recovered stale running jobs count=1"
     });
   });
 
