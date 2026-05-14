@@ -1,0 +1,9 @@
+.git
+.env
+.env.*
+!.env.remote-docs.example
+node_modules
+coverage
+dist
+tmp
+*.log

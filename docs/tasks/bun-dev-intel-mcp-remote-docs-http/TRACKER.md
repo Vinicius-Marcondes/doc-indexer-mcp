@@ -40,14 +40,14 @@ Commit message requirement:
 
 ## Current Task
 
-- Task ID: 22
-- Title: Implement stale content and tombstone policy
+- Task ID: 23
+- Title: Add Docker and deployment configuration
 - Owner: Codex
 - Status: done
 - Started: 2026-05-14
-- Planned validation: complete
-- Commit intent: Add deterministic freshness policy, source-backed tombstone confirmation, tombstone-aware search/page behavior, and tests.
-- Notes: Focused validation pass: `bun test tests/unit/docs/freshness-policy.test.ts tests/integration/docs/refresh/tombstone-policy.test.ts`; `bun test tests/integration/tools/get-doc-page.test.ts tests/integration/tools/search-docs.test.ts tests/integration/docs/refresh/docs-worker.test.ts`; `bun test tests/integration/storage/docs-storage.test.ts tests/integration/resources/docs-resources.test.ts tests/integration/docs/retrieval/keyword-retrieval.test.ts tests/integration/docs/retrieval/vector-retrieval.test.ts tests/integration/docs/retrieval/hybrid-retrieval.test.ts`; `bun run typecheck`. Final gates pass: `bun test` (410 pass, 17 skip); `bun run typecheck`; `bun run check` (410 pass, 17 skip). Scope excludes broad source discovery changes, row deletion without tombstone metadata, and model-based freshness inference.
+- Planned validation: `bun test tests/unit/deployment/docker-config.test.ts` pass; `bun run typecheck` pass; `bun run check` pass
+- Commit intent: Add Dockerfile, compose example, env example, and deployment documentation for separate HTTP server, docs worker, and Postgres/pgvector services.
+- Notes: Added placeholder-only env docs and local compose wiring; scope excludes production secret management beyond env docs, cloud-specific IaC, and TLS termination implementation.
 
 ## Task Status
 
@@ -76,7 +76,7 @@ Commit message requirement:
 | 20 | Add refresh job queue, dedupe, and priority scoring | done | [20](20-refresh-job-queue-and-priority.md) |
 | 21 | Implement docs worker scheduled and on-demand refresh | done | [21](21-docs-worker-scheduled-and-demand-refresh.md) |
 | 22 | Implement stale content and tombstone policy | done | [22](22-tombstone-stale-policy.md) |
-| 23 | Add Docker and deployment configuration | todo | [23](23-docker-compose-deployment.md) |
+| 23 | Add Docker and deployment configuration | done | [23](23-docker-compose-deployment.md) |
 | 24 | Add final QA, documentation, and traceability | todo | [24](24-final-qa-docs-traceability.md) |
 
 ## Work Log
@@ -130,3 +130,5 @@ Commit message requirement:
 | 2026-05-14 | 21 | done | Added docs worker command/service, scheduled source-index enqueue, bounded runnable job claiming, page/source/embedding/tombstone execution dispatch, failed-job error capture, and non-blocking search/page refresh enqueue. Focused worker/queue/tool/storage tests pass; `bun run typecheck` pass; `bun run check` pass (403 pass, 17 skipped). |
 | 2026-05-14 | 22 | in_progress | Started stale/tombstone policy task; will add failing freshness and tombstone tests before implementation. |
 | 2026-05-14 | 22 | done | Added shared freshness policy, source-confirmed tombstone policy, tombstone metadata in page responses, storage tombstone helpers, and worker tombstone handling for confirmed 404/410 failures. Focused freshness/tombstone/tool/worker/retrieval tests pass; `bun run typecheck` pass; `bun run check` pass (410 pass, 17 skipped). |
+| 2026-05-14 | 23 | in_progress | Started Docker deployment task; will add failing deployment config tests before adding Dockerfile, compose, env example, and docs. |
+| 2026-05-14 | 23 | done | Added Dockerfile, compose stack, env example, and deployment docs for separate HTTP server, docs worker, and Postgres/pgvector services. Focused deployment config tests pass; `bun run typecheck` pass; `bun run check` pass (415 pass, 17 skipped). |
