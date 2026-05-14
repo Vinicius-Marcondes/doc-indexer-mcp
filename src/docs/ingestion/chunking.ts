@@ -70,6 +70,10 @@ function headingText(line: string): { level: number; text: string } | null {
   };
 }
 
+function denseHeadingPath(path: readonly (string | undefined)[]): string[] {
+  return path.filter((part): part is string => typeof part === "string" && part.length > 0);
+}
+
 function parseMarkdownBlocks(content: string): MarkdownBlock[] {
   const blocks: MarkdownBlock[] = [];
   const headingPath: string[] = [];
@@ -106,21 +110,21 @@ function parseMarkdownBlocks(content: string): MarkdownBlock[] {
       headingPath[heading.level - 1] = heading.text;
       blocks.push({
         content: line.trim(),
-        headingPath: [...headingPath],
+        headingPath: denseHeadingPath(headingPath),
         isHeading: true
       });
-      currentHeadingPath = [...headingPath];
+      currentHeadingPath = denseHeadingPath(headingPath);
       continue;
     }
 
     if (!inCodeFence && line.trim().length === 0) {
       flushCurrent();
-      currentHeadingPath = [...headingPath];
+      currentHeadingPath = denseHeadingPath(headingPath);
       continue;
     }
 
     if (currentLines.length === 0) {
-      currentHeadingPath = [...headingPath];
+      currentHeadingPath = denseHeadingPath(headingPath);
     }
 
     currentLines.push(line);
