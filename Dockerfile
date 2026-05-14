@@ -4,7 +4,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY package.json bun.lock tsconfig.json ./
-RUN bun install --frozen-lockfile --production
+# Runtime modules still import the TypeScript compiler API through the server module graph.
+RUN bun install --frozen-lockfile
 
 COPY src ./src
 COPY migrations ./migrations

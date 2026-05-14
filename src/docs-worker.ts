@@ -9,6 +9,7 @@ import {
 } from "./docs/refresh/docs-worker";
 import { BunDocsDiscoveryClient, type DocsSourceFetchLike } from "./docs/sources/bun-docs-discovery";
 import { defaultDocsSourceRegistry } from "./docs/sources/bun-source-pack";
+import type { DocsSourceRegistry } from "./docs/sources/registry";
 import { createPostgresClient, type SqlClient } from "./docs/storage/database";
 import { RemoteDocsStorage } from "./docs/storage/docs-storage";
 
@@ -37,6 +38,31 @@ export type DocsWorkerStartupResult = DocsWorkerStartupSuccess | DocsWorkerStart
 
 function queueLimitFromConfig(input: { readonly maxPagesPerRun: number; readonly maxEmbeddingsPerRun: number }): number {
   return Math.max(input.maxPagesPerRun + input.maxEmbeddingsPerRun, 100);
+}
+
+export interface DocsSourceSeedStore {
+  readonly upsertSource: (input: {
+    readonly sourceId: string;
+    readonly displayName: string;
+    readonly enabled: boolean;
+    readonly allowedUrlPatterns: readonly string[];
+    readonly defaultTtlSeconds: number;
+  }) => Promise<unknown>;
+}
+
+export async function seedConfiguredDocsSources(
+  store: DocsSourceSeedStore,
+  sourceRegistry: DocsSourceRegistry = defaultDocsSourceRegistry
+): Promise<void> {
+  for (const source of sourceRegistry.list()) {
+    await store.upsertSource({
+      sourceId: source.sourceId,
+      displayName: source.displayName,
+      enabled: source.enabled,
+      allowedUrlPatterns: source.allowedUrlPatterns,
+      defaultTtlSeconds: source.refreshPolicy.defaultTtlSeconds
+    });
+  }
 }
 
 export function createDocsRefreshWorker(input: {
@@ -100,6 +126,7 @@ export async function runDocsWorkerOnce(options: RunDocsWorkerOnceOptions = {}):
   const sql = options.sql ?? createPostgresClient(configResult.config.database.url);
 
   try {
+    await seedConfiguredDocsSources(new RemoteDocsStorage(sql));
     const worker = createDocsRefreshWorker({
       config: configResult.config,
       sql,

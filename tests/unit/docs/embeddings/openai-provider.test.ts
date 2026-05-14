@@ -92,6 +92,31 @@ describe("OpenAI embedding provider", () => {
     });
   });
 
+  test("can target an OpenAI-compatible local embedding endpoint", async () => {
+    const captured: CapturedRequest[] = [];
+    const provider = new OpenAiEmbeddingProvider({
+      apiKey: "local-placeholder-key",
+      model: "text-embedding-3-small",
+      baseUrl: "http://localhost:11434/v1",
+      dimensions: 3,
+      fetchImpl: createCapturingFetch(
+        {
+          object: "list",
+          data: [{ object: "embedding", index: 0, embedding: [0.1, 0.2, 0.3] }],
+          model: "text-embedding-3-small",
+          usage: { prompt_tokens: 2, total_tokens: 2 }
+        },
+        captured
+      )
+    });
+
+    const result = await provider.embedTexts({ texts: ["Bun.serve"] });
+
+    expect(result.ok).toBe(true);
+    expect(captured[0]?.url).toBe("http://localhost:11434/v1/embeddings");
+    expect(captured[0]?.authorization).toBe("Bearer local-placeholder-key");
+  });
+
   test("parses embedding response", async () => {
     const provider = new OpenAiEmbeddingProvider({
       apiKey: "sk-test-openai-key",
@@ -226,7 +251,8 @@ describe("OpenAI embedding provider", () => {
       {
         provider: "openai",
         apiKey: "sk-test-openai-key",
-        model: "text-embedding-3-large"
+        model: "text-embedding-3-large",
+        baseUrl: "http://localhost:11434/v1"
       },
       {
         dimensions: 2,
@@ -245,6 +271,39 @@ describe("OpenAI embedding provider", () => {
     const result = await provider.embedTexts({ texts: ["configured"] });
 
     expect(result.ok).toBe(true);
+    expect(captured[0]?.url).toBe("http://localhost:11434/v1/embeddings");
     expect(captured[0]?.body).toMatchObject({ model: "text-embedding-3-large" });
+  });
+
+  test("uses configured embedding dimensions from parsed config", async () => {
+    const captured: CapturedRequest[] = [];
+    const provider = createOpenAiEmbeddingProviderFromConfig(
+      {
+        provider: "openai",
+        apiKey: "local-placeholder-key",
+        model: "qwen3-embedding",
+        baseUrl: "http://localhost:11434/v1",
+        dimensions: 1536
+      },
+      {
+        fetchImpl: createCapturingFetch(
+          {
+            object: "list",
+            data: [{ object: "embedding", index: 0, embedding: Array.from({ length: 1536 }, () => 0.1) }],
+            model: "qwen3-embedding",
+            usage: { prompt_tokens: 1, total_tokens: 1 }
+          },
+          captured
+        )
+      }
+    );
+
+    const result = await provider.embedTexts({ texts: ["configured"] });
+
+    expect(result.ok).toBe(true);
+    expect(captured[0]?.body).toMatchObject({
+      model: "qwen3-embedding",
+      dimensions: 1536
+    });
   });
 });

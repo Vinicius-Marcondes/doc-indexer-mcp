@@ -52,6 +52,10 @@ describe("remote docs Postgres migrations", () => {
     expect(sql).toContain("create unique index if not exists doc_refresh_jobs_pending_dedupe_idx");
     expect(sql).toContain("create index if not exists doc_chunks_search_vector_idx");
     expect(sql).toContain("using gin (search_vector)");
+    expect(sql).toContain("search_vector tsvector not null default ''::tsvector");
+    expect(sql).toContain("create or replace function remote_docs_update_chunk_search_vector");
+    expect(sql).toContain("create trigger doc_chunks_search_vector_update_trg");
+    expect(sql).not.toContain("search_vector tsvector generated always");
     expect(sql).toContain("embedding vector(1536)");
     expect(sql).toContain("using hnsw (embedding vector_cosine_ops)");
     expect(sql).toContain("doc_retrieval_events_query_hash_idx");
@@ -121,6 +125,14 @@ describe("remote docs Postgres migrations", () => {
       if (chunk === undefined) {
         throw new Error("Expected inserted chunk row.");
       }
+
+      const [storedChunk] = await sql<{ matched: boolean }[]>`
+        select search_vector @@ websearch_to_tsquery('english', 'Bun runtime') as matched
+        from doc_chunks
+        where id = ${chunk.id}
+      `;
+
+      expect(storedChunk?.matched).toBe(true);
 
       try {
         await sql.unsafe(`

@@ -41,7 +41,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: bun src/docs-worker.ts
+    command: >
+      sh -c 'set -e;
+      while true; do
+        bun src/docs-worker.ts;
+        sleep "$${DOCS_WORKER_POLL_SECONDS:-300}";
+      done'
     restart: unless-stopped
     env_file:
       - .env.remote-docs

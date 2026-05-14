@@ -60,6 +60,87 @@ bun src/http.ts
 bun src/docs-worker.ts
 ```
 
+For local Docker, start the HTTP server, worker, and Postgres stack:
+
+```bash
+cp .env.remote-docs.example .env.remote-docs
+docker compose -f docker-compose.remote-docs.yml --env-file .env.remote-docs up --build
+```
+
+### Connect An AI Agent Over HTTP
+
+Configure the agent's MCP client to use Streamable HTTP at the `/mcp` endpoint. The exact config keys vary by agent runtime, but the connection details are:
+
+```text
+Transport: Streamable HTTP
+URL: https://your-host.example.com/mcp
+Authorization: Bearer <MCP_BEARER_TOKEN>
+```
+
+Local development URL:
+
+```text
+http://localhost:3000/mcp
+```
+
+Generic MCP client configuration shape:
+
+```json
+{
+  "mcpServers": {
+    "bun-dev-intel-docs": {
+      "transport": "http",
+      "url": "https://your-host.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MCP_BEARER_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+If your agent separates transport type from URL, select `streamable-http` or `http` transport and use the same `/mcp` URL. MCP clients normally set protocol headers for you; raw HTTP callers must send `Accept: application/json, text/event-stream` and `Content-Type: application/json` for JSON-RPC POST requests.
+
+Example raw initialize request:
+
+```bash
+curl -sS https://your-host.example.com/mcp \
+  -H "Authorization: Bearer $MCP_BEARER_TOKEN" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"example-agent","version":"0.0.0"}}}'
+```
+
+Do not configure remote agents with the local stdio command unless they need local project analysis. The HTTP server is docs-only and exposes `search_docs`, `get_doc_page`, and `search_bun_docs`.
+
+### Configure Embeddings
+
+The remote docs service uses embeddings for semantic and hybrid search. The default production setup is OpenAI:
+
+```text
+EMBEDDING_PROVIDER=openai
+OPENAI_API_KEY=<openai-api-key>
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+```
+
+To use a local OpenAI-compatible embedding server, keep `EMBEDDING_PROVIDER=openai` and point the OpenAI client at the local `/v1` endpoint:
+
+```text
+EMBEDDING_PROVIDER=openai
+OPENAI_BASE_URL=http://localhost:11434/v1
+OPENAI_API_KEY=local-placeholder-key
+OPENAI_EMBEDDING_MODEL=qwen3-embedding
+OPENAI_EMBEDDING_DIMENSIONS=1536
+```
+
+When running through Docker Compose on macOS, use the host gateway name instead of `localhost`:
+
+```text
+OPENAI_BASE_URL=http://host.docker.internal:11434/v1
+```
+
+The local server must expose an OpenAI-compatible `POST /v1/embeddings` API. The current pgvector schema stores 1536-dimension vectors, so use a local embedding model or endpoint configuration that returns 1536-dimensional embeddings. For models that support configurable output size, keep `OPENAI_EMBEDDING_DIMENSIONS=1536`.
+
 Docker, compose, auth, refresh, embedding provider, and source-policy details are in [docs/deployment/remote-docs-http.md](docs/deployment/remote-docs-http.md).
 
 ## Safety
@@ -69,7 +150,7 @@ Docker, compose, auth, refresh, embedding provider, and source-policy details ar
 - It does not install dependencies or mutate lockfiles.
 - V2 `actions` are structured recommendations only. Any command or edit action is approval-gated with `requiresApproval: true`.
 - It skips `node_modules`, build output, binary files, and secret-like files during project analysis.
-- It uses stdio transport only. The project includes a local stdio transport because the published `@modelcontextprotocol/server@2.0.0-alpha.2` package does not expose the documented `@modelcontextprotocol/server/stdio` subpath.
+- Local project-analysis tools use stdio transport. Remote docs tools use Streamable HTTP at `/mcp` and remain docs-only.
 - Audit logging is off by default, writes only to the configured file, never writes to stdout, and skips writes when the audit path is inside the analyzed project.
 
 ## Which Tool Should An Agent Call?

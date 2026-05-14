@@ -15,6 +15,7 @@ export type OpenAiEmbeddingFetchLike = (url: string, init?: RequestInit) => Prom
 export interface OpenAiEmbeddingProviderOptions {
   readonly apiKey: string;
   readonly model: string;
+  readonly baseUrl?: string;
   readonly dimensions?: number;
   readonly embeddingVersion?: string;
   readonly batchSize?: number;
@@ -140,6 +141,7 @@ export class OpenAiEmbeddingProvider implements EmbeddingProvider {
     this.client = new OpenAI({
       apiKey: options.apiKey,
       maxRetries: 0,
+      ...(options.baseUrl === undefined ? {} : { baseURL: options.baseUrl }),
       ...(options.fetchImpl === undefined ? {} : { fetch: options.fetchImpl as unknown as typeof fetch })
     });
   }
@@ -184,10 +186,13 @@ export function createOpenAiEmbeddingProviderFromConfig(
   config: RemoteDocsConfig["embeddings"],
   options: OpenAiEmbeddingProviderFactoryOptions = {}
 ): OpenAiEmbeddingProvider {
+  const dimensions = options.dimensions ?? config.dimensions;
+
   return new OpenAiEmbeddingProvider({
     apiKey: config.apiKey,
     model: config.model,
-    ...(options.dimensions === undefined ? {} : { dimensions: options.dimensions }),
+    ...(config.baseUrl === undefined ? {} : { baseUrl: config.baseUrl }),
+    ...(dimensions === undefined ? {} : { dimensions }),
     ...(options.embeddingVersion === undefined ? {} : { embeddingVersion: options.embeddingVersion }),
     ...(options.batchSize === undefined ? {} : { batchSize: options.batchSize }),
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl })

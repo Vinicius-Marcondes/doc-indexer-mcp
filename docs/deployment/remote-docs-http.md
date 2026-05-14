@@ -35,12 +35,15 @@ Required variables:
 
 Common optional variables:
 
+- `DOCS_WORKER_POLL_SECONDS`
 - `DOCS_REFRESH_MAX_PAGES_PER_RUN`
 - `DOCS_REFRESH_MAX_EMBEDDINGS_PER_RUN`
 - `DOCS_REFRESH_MAX_CONCURRENCY`
 - `DOCS_SEARCH_DEFAULT_LIMIT`
 - `DOCS_SEARCH_MAX_LIMIT`
 - `DOCS_ALLOWED_ORIGINS`
+- `OPENAI_BASE_URL`
+- `OPENAI_EMBEDDING_DIMENSIONS`
 
 `MCP_BEARER_TOKEN`, `OPENAI_API_KEY`, and database passwords must be supplied through environment variables or an env file outside source control. The HTTP service requires bearer auth for `/mcp`; do not expose it without TLS.
 
@@ -49,8 +52,21 @@ Embedding provider configuration:
 - `EMBEDDING_PROVIDER=openai`
 - `OPENAI_API_KEY=<secret>`
 - `OPENAI_EMBEDDING_MODEL=text-embedding-3-small`
+- `OPENAI_BASE_URL=<optional OpenAI-compatible /v1 endpoint>`
+- `OPENAI_EMBEDDING_DIMENSIONS=<optional requested vector size>`
 
 The OpenAI key is used by the docs worker for chunk embeddings and by semantic retrieval for query embeddings. Provider errors are returned as structured warnings or failed jobs; they should not crash the HTTP server.
+
+For a local OpenAI-compatible embedding server, keep `EMBEDDING_PROVIDER=openai`, set `OPENAI_BASE_URL` to the local `/v1` endpoint, and use a placeholder API key if the local server does not require one:
+
+```text
+OPENAI_BASE_URL=http://host.docker.internal:11434/v1
+OPENAI_API_KEY=local-placeholder-key
+OPENAI_EMBEDDING_MODEL=qwen3-embedding
+OPENAI_EMBEDDING_DIMENSIONS=1536
+```
+
+The current pgvector schema stores 1536-dimension vectors. Local embedding models must return 1536-dimensional embeddings unless the schema and vector validation are updated. If the local OpenAI-compatible provider supports a `dimensions` request field, set `OPENAI_EMBEDDING_DIMENSIONS=1536`.
 
 ## Local Compose
 
@@ -89,7 +105,7 @@ Use the same image for both commands. Keep the worker separate from the HTTP ser
 
 ## Refresh Behavior
 
-The scheduled refresh path is controlled by `DOCS_REFRESH_INTERVAL` and defaults to weekly (`7d`). The docs worker discovers the official Bun docs index, refreshes pages, chunks changed content, writes embeddings, and records failures without blocking MCP requests.
+The scheduled refresh path is controlled by `DOCS_REFRESH_INTERVAL` and defaults to weekly (`7d`). In Docker Compose, `DOCS_WORKER_POLL_SECONDS` controls how often the long-running worker service wakes up to run one worker cycle; the default is 300 seconds. The docs worker discovers the official Bun docs index, refreshes pages, chunks changed content, writes embeddings, and records failures without blocking MCP requests.
 
 On-demand refresh can be queued by docs tools when content is missing, stale, or low confidence. These jobs are bounded, deduplicated by source/URL/job type, and processed by `bun src/docs-worker.ts`. Search returns the best available cited evidence promptly and reports `refreshQueued`.
 

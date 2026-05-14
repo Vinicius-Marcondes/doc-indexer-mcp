@@ -32,7 +32,8 @@ describe("remote docs Docker deployment config", () => {
     const dockerfile = await readText("Dockerfile");
 
     expect(dockerfile).toContain("FROM oven/bun:");
-    expect(dockerfile).toContain("bun install");
+    expect(dockerfile).toContain("bun install --frozen-lockfile");
+    expect(dockerfile).not.toContain("--production");
     expect(dockerfile).toContain("EXPOSE 3000");
     expect(dockerfile).toContain('CMD ["bun", "src/http.ts"]');
   });
@@ -61,6 +62,16 @@ describe("remote docs Docker deployment config", () => {
     expect(serviceBlock(compose, "mcp-http-server")).toContain("bun src/http.ts");
     expect(serviceBlock(compose, "docs-worker")).toContain("bun src/docs-worker.ts");
     expect(serviceBlock(compose, "docs-worker")).not.toContain("src/http.ts");
+  });
+
+  test("docs worker service stays alive between worker cycles", async () => {
+    const compose = await readText("docker-compose.remote-docs.yml");
+    const worker = serviceBlock(compose, "docs-worker");
+
+    expect(worker).toContain("sh -c");
+    expect(worker).toContain("while true");
+    expect(worker).toContain("bun src/docs-worker.ts");
+    expect(worker).toContain("DOCS_WORKER_POLL_SECONDS");
   });
 
   test("required env variable names are documented", async () => {

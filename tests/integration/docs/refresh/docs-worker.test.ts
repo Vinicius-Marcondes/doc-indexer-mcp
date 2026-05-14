@@ -219,6 +219,25 @@ describe("docs refresh worker", () => {
     expect(typeof module.runDocsWorkerOnce).toBe("function");
   });
 
+  test("worker startup seeds configured source rows before queueing refresh jobs", async () => {
+    const module = await import("../../../../src/docs-worker");
+    const seeded: unknown[] = [];
+
+    await module.seedConfiguredDocsSources({
+      async upsertSource(input) {
+        seeded.push(input);
+      }
+    });
+
+    expect(seeded).toContainEqual({
+      sourceId: "bun",
+      displayName: "Bun Documentation",
+      enabled: true,
+      allowedUrlPatterns: ["https://bun.com/docs/llms.txt", "https://bun.com/docs/llms-full.txt", "https://bun.com/docs/*"],
+      defaultTtlSeconds: 604800
+    });
+  });
+
   test("worker processes queued page refresh job", async () => {
     const { store, executor, worker } = createWorker();
     const job = store.seed({ url: pageUrl, jobType: "page", reason: "missing_content" });

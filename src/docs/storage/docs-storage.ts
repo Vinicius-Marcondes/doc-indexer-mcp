@@ -396,7 +396,7 @@ export class RemoteDocsStorage {
   async upsertSource(input: UpsertSourceInput): Promise<DocSource> {
     const rows = await this.sql<SourceRow[]>`
       insert into doc_sources (source_id, display_name, enabled, allowed_url_patterns, default_ttl_seconds)
-      values (${input.sourceId}, ${input.displayName}, ${input.enabled}, ${JSON.stringify(input.allowedUrlPatterns)}::jsonb, ${input.defaultTtlSeconds})
+      values (${input.sourceId}, ${input.displayName}, ${input.enabled}, to_jsonb(${input.allowedUrlPatterns}::text[]), ${input.defaultTtlSeconds})
       on conflict (source_id) do update set
         display_name = excluded.display_name,
         enabled = excluded.enabled,

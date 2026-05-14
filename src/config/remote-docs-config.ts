@@ -21,6 +21,8 @@ export interface RemoteDocsConfig {
     readonly provider: EmbeddingProvider;
     readonly apiKey: string;
     readonly model: string;
+    readonly baseUrl?: string;
+    readonly dimensions?: number;
   };
   readonly search: {
     readonly defaultLimit: number;
@@ -93,6 +95,30 @@ function parseInteger(
   return parsed;
 }
 
+function parseOptionalInteger(
+  env: Record<string, string | undefined>,
+  key: string,
+  issues: RemoteDocsConfigIssue[],
+  options: { min?: number; max?: number } = {}
+): number | undefined {
+  const raw = env[key]?.trim();
+
+  if (raw === undefined || raw.length === 0) {
+    return undefined;
+  }
+
+  const parsed = Number(raw);
+  const min = options.min ?? 1;
+  const max = options.max ?? Number.MAX_SAFE_INTEGER;
+
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    issues.push({ path: key, message: `${key} must be an integer between ${min} and ${max}.` });
+    return undefined;
+  }
+
+  return parsed;
+}
+
 function parseDatabaseUrl(raw: string, issues: RemoteDocsConfigIssue[]): void {
   if (raw.length === 0) {
     return;
@@ -105,6 +131,32 @@ function parseDatabaseUrl(raw: string, issues: RemoteDocsConfigIssue[]): void {
     }
   } catch {
     issues.push({ path: "DATABASE_URL", message: "DATABASE_URL must be a valid Postgres URL." });
+  }
+}
+
+function parseOptionalHttpUrl(
+  env: Record<string, string | undefined>,
+  key: string,
+  issues: RemoteDocsConfigIssue[]
+): string | undefined {
+  const raw = env[key]?.trim();
+
+  if (raw === undefined || raw.length === 0) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(raw);
+
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      issues.push({ path: key, message: `${key} must use http:// or https://.` });
+      return undefined;
+    }
+
+    return url.href.replace(/\/$/u, "");
+  } catch {
+    issues.push({ path: key, message: `${key} must be a valid URL.` });
+    return undefined;
   }
 }
 
@@ -181,6 +233,11 @@ export function parseRemoteDocsConfig(env: Record<string, string | undefined>): 
   const embeddingProvider = requiredString(env, "EMBEDDING_PROVIDER", issues);
   const openAiApiKey = requiredString(env, "OPENAI_API_KEY", issues);
   const openAiModel = requiredString(env, "OPENAI_EMBEDDING_MODEL", issues);
+  const openAiBaseUrl = parseOptionalHttpUrl(env, "OPENAI_BASE_URL", issues);
+  const openAiDimensions = parseOptionalInteger(env, "OPENAI_EMBEDDING_DIMENSIONS", issues, {
+    min: 1,
+    max: 8192
+  });
   const allowedOrigins = parseAllowedOrigins(env.DOCS_ALLOWED_ORIGINS, issues);
   const maxRequestBodyBytes = parseInteger(env, "MCP_HTTP_MAX_REQUEST_BODY_BYTES", 1024 * 1024, issues, {
     min: 1,
@@ -198,6 +255,13 @@ export function parseRemoteDocsConfig(env: Record<string, string | undefined>): 
 
   if (embeddingProvider.length > 0 && embeddingProvider !== "openai") {
     issues.push({ path: "EMBEDDING_PROVIDER", message: 'EMBEDDING_PROVIDER must be "openai" for V1.' });
+  }
+
+  if (openAiDimensions !== undefined && openAiDimensions !== 1536) {
+    issues.push({
+      path: "OPENAI_EMBEDDING_DIMENSIONS",
+      message: "OPENAI_EMBEDDING_DIMENSIONS must be 1536 for the current remote docs vector schema."
+    });
   }
 
   if (defaultLimit > maxLimit) {
@@ -232,7 +296,9 @@ export function parseRemoteDocsConfig(env: Record<string, string | undefined>): 
       embeddings: {
         provider: "openai",
         apiKey: openAiApiKey,
-        model: openAiModel
+        model: openAiModel,
+        ...(openAiBaseUrl === undefined ? {} : { baseUrl: openAiBaseUrl }),
+        ...(openAiDimensions === undefined ? {} : { dimensions: openAiDimensions })
       },
       search: {
         defaultLimit,

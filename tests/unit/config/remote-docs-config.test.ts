@@ -46,6 +46,45 @@ describe("remote docs runtime config", () => {
     expect(result.config.refresh.interval).toEqual({ raw: "7d", seconds: 604800 });
   });
 
+  test("OpenAI-compatible local embedding base URL parses", () => {
+    const result = parseRemoteDocsConfig(
+      validEnv({
+        OPENAI_BASE_URL: "http://localhost:11434/v1",
+        OPENAI_API_KEY: "local-placeholder-key",
+        OPENAI_EMBEDDING_MODEL: "qwen3-embedding",
+        OPENAI_EMBEDDING_DIMENSIONS: "1536"
+      })
+    );
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.config.embeddings).toMatchObject({
+      provider: "openai",
+      apiKey: "local-placeholder-key",
+      model: "qwen3-embedding",
+      baseUrl: "http://localhost:11434/v1",
+      dimensions: 1536
+    });
+  });
+
+  test("embedding dimensions must match the V1 vector schema", () => {
+    const result = parseRemoteDocsConfig(validEnv({ OPENAI_EMBEDDING_DIMENSIONS: "4096" }));
+
+    expect(result.ok).toBe(false);
+    expect(result.ok ? "" : result.error.issues.map((issue) => issue.path).join(",")).toContain("OPENAI_EMBEDDING_DIMENSIONS");
+  });
+
+  test("invalid embedding base URL fails", () => {
+    const result = parseRemoteDocsConfig(validEnv({ OPENAI_BASE_URL: "not a url" }));
+
+    expect(result.ok).toBe(false);
+    expect(result.ok ? "" : result.error.issues.map((issue) => issue.path).join(",")).toContain("OPENAI_BASE_URL");
+  });
+
   test("missing bearer token fails", () => {
     const result = parseRemoteDocsConfig(validEnv({ MCP_BEARER_TOKEN: undefined }));
 

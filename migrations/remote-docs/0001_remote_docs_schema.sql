@@ -49,12 +49,7 @@ CREATE TABLE IF NOT EXISTS doc_chunks (
   content text NOT NULL,
   content_hash text NOT NULL,
   token_estimate integer NOT NULL,
-  search_vector tsvector GENERATED ALWAYS AS (
-    to_tsvector(
-      'english',
-      coalesce(title, '') || ' ' || coalesce(array_to_string(heading_path, ' '), '') || ' ' || coalesce(content, '')
-    )
-  ) STORED,
+  search_vector tsvector NOT NULL DEFAULT ''::tsvector,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT doc_chunks_page_chunk_index_key UNIQUE (page_id, chunk_index),
@@ -62,6 +57,36 @@ CREATE TABLE IF NOT EXISTS doc_chunks (
   CONSTRAINT doc_chunks_chunk_index_nonnegative CHECK (chunk_index >= 0),
   CONSTRAINT doc_chunks_token_estimate_nonnegative CHECK (token_estimate >= 0)
 );
+
+CREATE OR REPLACE FUNCTION remote_docs_update_chunk_search_vector()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NEW.search_vector :=
+    to_tsvector(
+      'english',
+      coalesce(NEW.title, '') || ' ' || coalesce(array_to_string(NEW.heading_path, ' '), '') || ' ' || coalesce(NEW.content, '')
+    );
+  RETURN NEW;
+END;
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'doc_chunks_search_vector_update_trg'
+  ) THEN
+    CREATE TRIGGER doc_chunks_search_vector_update_trg
+    BEFORE INSERT OR UPDATE OF title, heading_path, content
+    ON doc_chunks
+    FOR EACH ROW
+    EXECUTE FUNCTION remote_docs_update_chunk_search_vector();
+  END IF;
+END;
+$$;
 
 CREATE INDEX IF NOT EXISTS doc_chunks_source_url_idx ON doc_chunks (source_id, url);
 CREATE INDEX IF NOT EXISTS doc_chunks_content_hash_idx ON doc_chunks (content_hash);
