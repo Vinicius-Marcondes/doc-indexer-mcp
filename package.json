@@ -12,7 +12,11 @@
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
+    "@modelcontextprotocol/hono": "2.0.0-alpha.2",
     "@modelcontextprotocol/server": "2.0.0-alpha.2",
+    "hono": "^4.12.18",
+    "openai": "^6.37.0",
+    "postgres": "^3.4.9",
     "zod": "^4.1.13"
   },
   "devDependencies": {

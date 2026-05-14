@@ -47,14 +47,14 @@ Commit message requirement:
 - Started: none
 - Planned validation: none
 - Commit intent: none
-- Notes: Task 00 completed; ready to advance to Task 01 after the focused commit.
+- Notes: Task 01 completed; ready to advance to Task 02 after the focused commit.
 
 ## Task Status
 
 | Task | Title | Status | Task File |
 | --- | --- | --- | --- |
 | 00 | Revalidate official sources and implementation assumptions | done | [00](00-revalidate-official-sources.md) |
-| 01 | Select MCP SDK/package plan and dependency baseline | todo | [01](01-select-sdk-and-dependency-plan.md) |
+| 01 | Select MCP SDK/package plan and dependency baseline | done | [01](01-select-sdk-and-dependency-plan.md) |
 | 02 | Partition docs-only remote capabilities from local stdio capabilities | todo | [02-capability-partition-docs-only-server.md](02-capability-partition-docs-only-server.md) |
 | 03 | Implement Hono HTTP shell, auth, health, and readiness | todo | [03](03-hono-http-shell-auth-health.md) |
 | 04 | Wire Streamable HTTP MCP endpoint | todo | [04](04-streamable-http-mcp-endpoint.md) |
@@ -86,3 +86,5 @@ Commit message requirement:
 | 2026-05-14 | Planning | done | Split remote docs HTTP PRD into per-task implementation files and initialized tracker. No implementation started. |
 | 2026-05-14 | 00 | in_progress | Started official source revalidation before implementation; product tests not required for this docs-only task. |
 | 2026-05-14 | 00 | done | Added source revalidation note; no PRD correction required. `test -f source-revalidation.md` pass; `bun run check` pass (279 pass, 2 live skipped). |
+| 2026-05-14 | 01 | in_progress | Started dependency baseline task; will add failing scaffold/import smoke tests before package changes. |
+| 2026-05-14 | 01 | done | Added Hono, MCP Hono adapter, Postgres, and OpenAI dependency baseline plus package-plan/import tests. Published MCP stdio subpath still fails in this workspace, so local stdio shim remains. Focused tests pass; `bun run typecheck` pass; `bun run check` pass (283 pass, 2 live skipped). |

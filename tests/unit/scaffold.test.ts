@@ -15,6 +15,7 @@ describe("project scaffold", () => {
     expect(existsSync(packagePath)).toBe(true);
 
     const packageJson = readJson(packagePath) as {
+      dependencies?: Record<string, string>;
       scripts?: Record<string, string>;
       type?: string;
     };
@@ -26,6 +27,12 @@ describe("project scaffold", () => {
     expect(packageJson.scripts?.check).toContain("bun test");
     expect(packageJson.scripts?.check).toContain("bun run typecheck");
     expect(packageJson.scripts?.dev).toContain("bun");
+    expect(packageJson.scripts?.start).toBeUndefined();
+    expect(packageJson.dependencies?.["@modelcontextprotocol/server"]).toBe("2.0.0-alpha.2");
+    expect(packageJson.dependencies?.["@modelcontextprotocol/hono"]).toBe("2.0.0-alpha.2");
+    expect(packageJson.dependencies?.hono).toBeDefined();
+    expect(packageJson.dependencies?.postgres).toBeDefined();
+    expect(packageJson.dependencies?.openai).toBeDefined();
   });
 
   test("provides a parseable Bun-compatible tsconfig", () => {
@@ -59,5 +66,20 @@ describe("project scaffold", () => {
     expect(existsSync(resolve(rootDir, "tests/unit"))).toBe(true);
     expect(existsSync(resolve(rootDir, "tests/integration"))).toBe(true);
     expect(existsSync(resolve(rootDir, "tests/fixtures"))).toBe(true);
+  });
+
+  test("documents the remote docs HTTP dependency plan", () => {
+    const packagePlanPath = resolve(rootDir, "docs/tasks/bun-dev-intel-mcp-remote-docs-http/package-plan.md");
+
+    expect(existsSync(packagePlanPath)).toBe(true);
+
+    const packagePlan = readFileSync(packagePlanPath, "utf8");
+
+    expect(packagePlan).toContain("@modelcontextprotocol/server");
+    expect(packagePlan).toContain("@modelcontextprotocol/hono");
+    expect(packagePlan).toContain("hono");
+    expect(packagePlan).toContain("postgres");
+    expect(packagePlan).toContain("openai");
+    expect(packagePlan).toContain("No product behavior");
   });
 });
