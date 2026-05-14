@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parseRemoteDocsConfig } from "../../../src/config/remote-docs-config";
+import { createDatabaseReadinessCheck, type SqlClient } from "../../../src/docs/storage/database";
 import { createRemoteHttpApp } from "../../../src/http/app";
 
 const bearerToken = "test-token";
@@ -60,6 +61,34 @@ describe("remote Hono HTTP shell", () => {
         message: "database unavailable"
       }
     });
+  });
+
+  test("GET /readyz passes with a mocked DB readiness check", async () => {
+    const sql = (() => Promise.resolve([{ ready: 1 }])) as unknown as SqlClient;
+    const app = createRemoteHttpApp({
+      bearerToken,
+      readinessCheck: createDatabaseReadinessCheck(sql)
+    });
+
+    const response = await app.request("/readyz");
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, status: "ready", details: { database: "ready" } });
+  });
+
+  test("GET /readyz fails when mocked DB readiness check fails", async () => {
+    const sql = (() => Promise.reject(new Error("database down"))) as unknown as SqlClient;
+    const app = createRemoteHttpApp({
+      bearerToken,
+      readinessCheck: createDatabaseReadinessCheck(sql)
+    });
+
+    const response = await app.request("/readyz");
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toMatchObject({ ok: false, error: { code: "not_ready", message: "Database is not ready." } });
   });
 
   test("/mcp rejects missing bearer token", async () => {
