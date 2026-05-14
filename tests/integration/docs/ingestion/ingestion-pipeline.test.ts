@@ -3,7 +3,16 @@ import { FakeEmbeddingProvider } from "../../../../src/docs/embeddings/fake-prov
 import { createEmbeddingProviderFailure, type EmbedTextsRequest, type EmbedTextsResult } from "../../../../src/docs/embeddings/provider";
 import { BunDocsIngestionPipeline } from "../../../../src/docs/ingestion/ingestion-pipeline";
 import { BunDocsDiscoveryClient, BUN_DOCS_PRIMARY_INDEX_URL, type DocsSourceFetchLike } from "../../../../src/docs/sources/bun-docs-discovery";
-import { RemoteDocsStorage } from "../../../../src/docs/storage/docs-storage";
+import {
+  RemoteDocsStorage,
+  type DocChunk,
+  type DocEmbedding,
+  type DocPage,
+  type InsertChunksInput,
+  type InsertEmbeddingInput,
+  type UpsertPageInput,
+  type UpsertSourceInput
+} from "../../../../src/docs/storage/docs-storage";
 import type { SqlClient } from "../../../../src/docs/storage/database";
 import { createRemoteDocsTestDatabase } from "../../storage/test-harness";
 
@@ -77,6 +86,85 @@ class CountingFakeEmbeddingProvider extends FakeEmbeddingProvider {
     this.calls += 1;
     this.texts += request.texts.length;
     return super.embedTexts(request);
+  }
+}
+
+class InMemoryPartialStorage {
+  page: DocPage | null = null;
+  chunks: DocChunk[] = [];
+  private embeddings = new Map<number, DocEmbedding>();
+  private nextChunkId = 1;
+  private nextEmbeddingId = 1;
+
+  async upsertSource(_input: UpsertSourceInput): Promise<unknown> {
+    return {};
+  }
+
+  async getPageByCanonicalUrl(_sourceId: string, canonicalUrl: string): Promise<DocPage | null> {
+    return this.page?.canonicalUrl === canonicalUrl ? this.page : null;
+  }
+
+  async upsertPage(input: UpsertPageInput): Promise<DocPage> {
+    this.page = {
+      id: this.page?.id ?? 1,
+      sourceId: input.sourceId,
+      url: input.url,
+      canonicalUrl: input.canonicalUrl,
+      title: input.title,
+      contentHash: input.contentHash
+    };
+
+    return this.page;
+  }
+
+  async deleteChunksForPage(_pageId: number): Promise<number> {
+    const count = this.chunks.length;
+    this.chunks = [];
+    this.embeddings.clear();
+    return count;
+  }
+
+  async insertChunks(input: InsertChunksInput): Promise<DocChunk[]> {
+    this.chunks = input.chunks.map((chunk) => ({
+      id: this.nextChunkId++,
+      sourceId: input.sourceId,
+      pageId: input.pageId,
+      url: chunk.url,
+      title: chunk.title,
+      headingPath: chunk.headingPath,
+      chunkIndex: chunk.chunkIndex,
+      content: chunk.content,
+      contentHash: chunk.contentHash,
+      tokenEstimate: chunk.tokenEstimate
+    }));
+
+    return this.chunks;
+  }
+
+  async getChunksForPage(_pageId: number): Promise<DocChunk[]> {
+    return this.chunks;
+  }
+
+  async getEmbeddingForChunk(input: { readonly chunkId: number }): Promise<DocEmbedding | null> {
+    return this.embeddings.get(input.chunkId) ?? null;
+  }
+
+  async insertEmbedding(input: InsertEmbeddingInput): Promise<DocEmbedding> {
+    const embedding: DocEmbedding = {
+      id: this.nextEmbeddingId++,
+      chunkId: input.chunkId,
+      provider: input.provider,
+      model: input.model,
+      embeddingVersion: input.embeddingVersion,
+      dimensions: input.dimensions
+    };
+    this.embeddings.set(input.chunkId, embedding);
+    return embedding;
+  }
+
+  clearChunksAndEmbeddings(): void {
+    this.chunks = [];
+    this.embeddings.clear();
   }
 }
 
@@ -217,6 +305,34 @@ describe("docs ingestion pipeline", () => {
       expect(await rowCount(database.sql, "doc_embeddings")).toBe(0);
     } finally {
       await database.cleanup();
+    }
+  });
+
+  test("rebuilds chunks when an unchanged page has no stored chunks", async () => {
+    const storage = new InMemoryPartialStorage();
+    const provider = new CountingFakeEmbeddingProvider({ dimensions: 1536 });
+    const pipeline = createPipeline(
+      storage as unknown as RemoteDocsStorage,
+      createFetch(() => "<main><h1>HTTP server</h1><p>Use <code>Bun.serve</code>.</p></main>"),
+      provider
+    );
+    const first = await pipeline.ingestPage(pageUrl);
+
+    expect(first.ok).toBe(true);
+    expect(storage.chunks.length).toBeGreaterThan(0);
+
+    storage.clearChunksAndEmbeddings();
+
+    const second = await pipeline.ingestPage(pageUrl);
+
+    expect(second.ok).toBe(true);
+    expect(storage.chunks.length).toBeGreaterThan(0);
+
+    if (second.ok) {
+      expect(second.summary.pagesUnchanged).toBe(1);
+      expect(second.summary.chunksStored).toBe(storage.chunks.length);
+      expect(second.summary.embeddingsCreated).toBe(storage.chunks.length);
+      expect(second.summary.chunksReused).toBe(0);
     }
   });
 

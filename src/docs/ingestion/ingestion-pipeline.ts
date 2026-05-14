@@ -189,8 +189,9 @@ export class BunDocsIngestionPipeline {
       pagesUnchanged: pageChanged ? 0 : 1
     };
     let chunks: readonly DocChunk[];
+    const existingChunks = pageChanged ? [] : await this.storage.getChunksForPage(page.id);
 
-    if (pageChanged) {
+    if (pageChanged || existingChunks.length === 0) {
       await this.storage.deleteChunksForPage(page.id);
       const chunked = chunkDocsPage({
         sourceId: this.sourcePack.sourceId,
@@ -218,7 +219,7 @@ export class BunDocsIngestionPipeline {
         chunksStored: chunks.length
       };
     } else {
-      chunks = await this.storage.getChunksForPage(page.id);
+      chunks = existingChunks;
       summary = {
         ...summary,
         chunksReused: chunks.length
