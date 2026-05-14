@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: None
 - Planned validation: None
 - Commit intent: None
-- Notes: Task 14 is complete and ready to commit.
+- Notes: Task 15 is complete and ready to commit.
 
 ## Task Status
 
@@ -68,7 +68,7 @@ Commit message requirement:
 | 12 | Add OpenAI embedding provider | done | [12](12-openai-embedding-provider.md) |
 | 13 | Store ingested pages, chunks, and embeddings | done | [13](13-ingestion-pipeline-store-pages-chunks-embeddings.md) |
 | 14 | Implement Postgres full-text keyword retrieval | done | [14](14-keyword-retrieval-postgres-fts.md) |
-| 15 | Implement pgvector semantic retrieval | todo | [15](15-vector-retrieval-pgvector.md) |
+| 15 | Implement pgvector semantic retrieval | done | [15](15-vector-retrieval-pgvector.md) |
 | 16 | Implement hybrid ranking, snippets, and confidence | todo | [16](16-hybrid-ranking-confidence-snippets.md) |
 | 17 | Implement `search_docs` MCP tool | todo | [17](17-search-docs-tool.md) |
 | 18 | Implement `get_doc_page` and docs resources | todo | [18](18-get-doc-page-and-doc-resources.md) |
@@ -114,3 +114,5 @@ Commit message requirement:
 | 2026-05-14 | 13 | done | Added Bun docs ingestion orchestration plus storage helpers for page lookup, chunk replacement, and embedding reuse. Focused ingestion/storage/embedding tests pass; real Postgres ingestion cases are gated/skipped without `TEST_DATABASE_URL`; `bun run typecheck` pass; `bun run check` pass (355 pass, 8 skipped). |
 | 2026-05-14 | 14 | in_progress | Started keyword retrieval task; will add failing Postgres FTS and limit-bound tests before implementation. |
 | 2026-05-14 | 14 | done | Added Postgres keyword retrieval with source filtering, bounded limits, generated search-vector ranking, exact code/CLI term boosts, snippets, and retrieval metadata. Focused keyword/storage tests pass; real Postgres retrieval cases are gated/skipped without `TEST_DATABASE_URL`; `bun run typecheck` pass; `bun run check` pass (356 pass, 13 skipped). |
+| 2026-05-14 | 15 | in_progress | Started semantic retrieval task; will add failing pgvector and provider-failure tests before implementation. |
+| 2026-05-14 | 15 | done | Added provider-backed pgvector semantic retrieval with bounded limits, source/provider/model/version filtering, structured provider failures, dimension validation, and retrieval metadata. Focused vector/embedding/storage tests pass; real Postgres vector cases are gated/skipped without `TEST_DATABASE_URL`; `bun run typecheck` pass; `bun run check` pass (359 pass, 17 skipped). |
