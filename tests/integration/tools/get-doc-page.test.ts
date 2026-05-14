@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { getDocPage } from "../../../src/tools/get-doc-page";
 import { defaultDocsSourceRegistry } from "../../../src/docs/sources/bun-source-pack";
 import type { StoredDocsChunk, StoredDocsPage } from "../../../src/resources/docs-resources";
+import type { EnqueueRefreshJobInput } from "../../../src/docs/refresh/refresh-queue";
 
 const now = "2026-05-14T12:00:00.000Z";
 
@@ -68,6 +69,29 @@ class FakePageStore {
 
   async getChunkById(_input: { sourceId: string; chunkId: number }): Promise<StoredDocsChunk | null> {
     return this.chunks[0] ?? null;
+  }
+}
+
+class StubRefreshQueue {
+  readonly calls: EnqueueRefreshJobInput[] = [];
+
+  async enqueue(input: EnqueueRefreshJobInput) {
+    this.calls.push(input);
+    return {
+      status: "queued" as const,
+      priority: 70,
+      runAfter: now,
+      job: {
+        id: this.calls.length,
+        sourceId: input.sourceId,
+        url: input.url ?? null,
+        jobType: input.jobType,
+        reason: input.reason,
+        status: "queued" as const,
+        priority: 70,
+        runAfter: now
+      }
+    };
   }
 }
 
@@ -142,6 +166,35 @@ describe("get_doc_page tool", () => {
     expect(result.warnings.map((warning) => warning.code)).toContain("missing_page");
   });
 
+  test("missing allowed page can enqueue refresh", async () => {
+    const store = new FakePageStore();
+    const refreshQueue = new StubRefreshQueue();
+    store.pageByUrl = null;
+
+    const result = await getDocPage(
+      { url: "https://bun.com/docs/runtime/http-server" },
+      { ...dependencies(store), refreshQueue }
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("Expected missing page response.");
+    }
+    expect(result.freshness).toBe("missing");
+    expect(result.refreshQueued).toBe(true);
+    expect(refreshQueue.calls).toEqual([
+      {
+        sourceId: "bun",
+        url: "https://bun.com/docs/runtime/http-server",
+        jobType: "page",
+        reason: "missing_content",
+        prioritySignals: {
+          staleHitCount: 1
+        }
+      }
+    ]);
+  });
+
   test("stale page returns stale freshness", async () => {
     const store = new FakePageStore();
     store.pageByUrl = page({ expiresAt: "2026-05-01T00:00:00.000Z" });
@@ -155,5 +208,29 @@ describe("get_doc_page tool", () => {
     expect(result.freshness).toBe("stale");
     expect(result.refreshReason).toBe("stale_content");
     expect(result.warnings.map((warning) => warning.code)).toContain("stale_page");
+  });
+
+  test("stale page can enqueue refresh", async () => {
+    const store = new FakePageStore();
+    const refreshQueue = new StubRefreshQueue();
+    store.pageByUrl = page({ expiresAt: "2026-05-01T00:00:00.000Z" });
+
+    const result = await getDocPage(
+      { url: "https://bun.com/docs/runtime/http-server" },
+      { ...dependencies(store), refreshQueue }
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("Expected stale page response.");
+    }
+    expect(result.freshness).toBe("stale");
+    expect(result.refreshQueued).toBe(true);
+    expect(refreshQueue.calls[0]).toMatchObject({
+      sourceId: "bun",
+      url: "https://bun.com/docs/runtime/http-server",
+      jobType: "page",
+      reason: "stale_content"
+    });
   });
 });

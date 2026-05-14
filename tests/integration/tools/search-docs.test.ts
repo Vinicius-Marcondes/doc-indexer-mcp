@@ -8,6 +8,7 @@ import {
 import type { KeywordSearchInput, KeywordSearchResult } from "../../../src/docs/retrieval/keyword-retrieval";
 import type { VectorSearchInput, VectorSearchResult } from "../../../src/docs/retrieval/vector-retrieval";
 import { defaultDocsSourceRegistry } from "../../../src/docs/sources/bun-source-pack";
+import type { EnqueueRefreshJobInput } from "../../../src/docs/refresh/refresh-queue";
 
 const generatedAt = "2026-05-14T12:00:00.000Z";
 
@@ -96,6 +97,29 @@ class StubKeywordRetrieval {
           contentHash: "chunk-1"
         }
       ]
+    };
+  }
+}
+
+class StubRefreshQueue {
+  readonly calls: EnqueueRefreshJobInput[] = [];
+
+  async enqueue(input: EnqueueRefreshJobInput) {
+    this.calls.push(input);
+    return {
+      status: "queued" as const,
+      priority: 75,
+      runAfter: generatedAt,
+      job: {
+        id: this.calls.length,
+        sourceId: input.sourceId,
+        url: input.url ?? null,
+        jobType: input.jobType,
+        reason: input.reason,
+        status: "queued" as const,
+        priority: 75,
+        runAfter: generatedAt
+      }
     };
   }
 }
@@ -249,6 +273,49 @@ describe("search_docs tool", () => {
     expect(result.confidence).toBe("low");
     expect(result.refreshReason).toBe("missing_content");
     expect(result.warnings.map((warning) => warning.code)).toContain("no_results");
+  });
+
+  test("low-confidence search enqueues refresh and returns promptly", async () => {
+    const refreshQueue = new StubRefreshQueue();
+    const result = await searchDocs(
+      { query: "missing evidence" },
+      {
+        ...dependencies(
+          new StubDocsRetrieval(
+            retrievalResult({
+              results: [],
+              freshness: "missing",
+              confidence: "low",
+              lowConfidence: true,
+              refreshReason: "missing_content",
+              retrieval: {
+                mode: "hybrid",
+                keywordAttempted: true,
+                vectorAttempted: true,
+                keywordResultCount: 0,
+                vectorResultCount: 0,
+                mergedResultCount: 0,
+                queryHash: "hash"
+              },
+              warnings: [{ code: "no_results", message: "No indexed documentation evidence matched the query." }]
+            })
+          )
+        ),
+        refreshQueue
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("Expected search_docs success.");
+    }
+    expect(result.refreshQueued).toBe(true);
+    expect(refreshQueue.calls).toHaveLength(1);
+    expect(refreshQueue.calls[0]).toMatchObject({
+      sourceId: "bun",
+      jobType: "source_index",
+      reason: "missing_content"
+    });
   });
 
   test("every result has citation metadata", async () => {

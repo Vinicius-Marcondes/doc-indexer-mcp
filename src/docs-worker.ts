@@ -1,0 +1,145 @@
+import { parseRemoteDocsConfig, type RemoteDocsConfig, type RemoteDocsConfigIssue } from "./config/remote-docs-config";
+import { createOpenAiEmbeddingProviderFromConfig } from "./docs/embeddings/openai-provider";
+import { BunDocsIngestionPipeline } from "./docs/ingestion/ingestion-pipeline";
+import { RefreshJobQueue } from "./docs/refresh/refresh-queue";
+import {
+  BunDocsRefreshJobExecutor,
+  DocsRefreshWorker,
+  type DocsRefreshWorkerCycleResult
+} from "./docs/refresh/docs-worker";
+import { BunDocsDiscoveryClient, type DocsSourceFetchLike } from "./docs/sources/bun-docs-discovery";
+import { defaultDocsSourceRegistry } from "./docs/sources/bun-source-pack";
+import { createPostgresClient, type SqlClient } from "./docs/storage/database";
+import { RemoteDocsStorage } from "./docs/storage/docs-storage";
+
+export interface RunDocsWorkerOnceOptions {
+  readonly env?: Record<string, string | undefined>;
+  readonly fetchImpl?: DocsSourceFetchLike;
+  readonly sql?: SqlClient;
+  readonly worker?: DocsRefreshWorker;
+}
+
+export interface DocsWorkerStartupSuccess {
+  readonly ok: true;
+  readonly result: DocsRefreshWorkerCycleResult;
+}
+
+export interface DocsWorkerStartupFailure {
+  readonly ok: false;
+  readonly error: {
+    readonly code: "startup_failed";
+    readonly message: string;
+    readonly issues?: readonly RemoteDocsConfigIssue[];
+  };
+}
+
+export type DocsWorkerStartupResult = DocsWorkerStartupSuccess | DocsWorkerStartupFailure;
+
+function queueLimitFromConfig(input: { readonly maxPagesPerRun: number; readonly maxEmbeddingsPerRun: number }): number {
+  return Math.max(input.maxPagesPerRun + input.maxEmbeddingsPerRun, 100);
+}
+
+export function createDocsRefreshWorker(input: {
+  readonly config: RemoteDocsConfig;
+  readonly sql: SqlClient;
+  readonly fetchImpl?: DocsSourceFetchLike;
+}): DocsRefreshWorker {
+  const storage = new RemoteDocsStorage(input.sql);
+  const embeddingProvider = createOpenAiEmbeddingProviderFromConfig(input.config.embeddings);
+  const pipeline = new BunDocsIngestionPipeline({
+    storage,
+    discoveryClient: new BunDocsDiscoveryClient({
+      ...(input.fetchImpl === undefined ? {} : { fetchImpl: input.fetchImpl })
+    }),
+    embeddingProvider
+  });
+  const maxPendingJobs = queueLimitFromConfig(input.config.refresh);
+  const queue = new RefreshJobQueue({
+    store: storage,
+    sourceRegistry: defaultDocsSourceRegistry,
+    now: () => new Date().toISOString(),
+    maxPendingJobs,
+    maxPendingJobsPerSource: maxPendingJobs
+  });
+
+  return new DocsRefreshWorker({
+    store: storage,
+    queue,
+    executor: new BunDocsRefreshJobExecutor({ pipeline }),
+    sourceRegistry: defaultDocsSourceRegistry,
+    now: () => new Date().toISOString(),
+    refreshIntervalSeconds: input.config.refresh.interval.seconds,
+    maxJobsPerRun: input.config.refresh.maxPagesPerRun + input.config.refresh.maxEmbeddingsPerRun,
+    maxPagesPerRun: input.config.refresh.maxPagesPerRun,
+    maxEmbeddingsPerRun: input.config.refresh.maxEmbeddingsPerRun,
+    maxConcurrency: input.config.refresh.maxConcurrency
+  });
+}
+
+export async function runDocsWorkerOnce(options: RunDocsWorkerOnceOptions = {}): Promise<DocsWorkerStartupResult> {
+  if (options.worker !== undefined) {
+    return {
+      ok: true,
+      result: await options.worker.runCycle()
+    };
+  }
+
+  const configResult = parseRemoteDocsConfig(options.env ?? Bun.env);
+
+  if (!configResult.ok) {
+    return {
+      ok: false,
+      error: {
+        code: "startup_failed",
+        message: configResult.error.message,
+        issues: configResult.error.issues
+      }
+    };
+  }
+
+  const sql = options.sql ?? createPostgresClient(configResult.config.database.url);
+
+  try {
+    const worker = createDocsRefreshWorker({
+      config: configResult.config,
+      sql,
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl })
+    });
+    const result = await worker.runCycle();
+
+    return {
+      ok: true,
+      result
+    };
+  } catch {
+    return {
+      ok: false,
+      error: {
+        code: "startup_failed",
+        message: "Docs worker failed to run."
+      }
+    };
+  } finally {
+    if (options.sql === undefined) {
+      await sql.end?.({ timeout: 1 });
+    }
+  }
+}
+
+export function startDocsWorker(options: RunDocsWorkerOnceOptions = {}): Promise<DocsWorkerStartupResult> {
+  return runDocsWorkerOnce(options);
+}
+
+if (import.meta.main) {
+  const result = await startDocsWorker();
+
+  if (!result.ok) {
+    process.stderr.write(`bun-dev-intel-mcp docs worker failed: ${result.error.message}\n`);
+    process.exit(1);
+  }
+
+  process.stderr.write(
+    `bun-dev-intel-mcp docs worker processed ${result.result.processed} refresh jobs ` +
+      `(${result.result.succeeded} succeeded, ${result.result.failed} failed)\n`
+  );
+}

@@ -40,14 +40,14 @@ Commit message requirement:
 
 ## Current Task
 
-- Task ID: 20
-- Title: Add refresh job queue, dedupe, and priority scoring
+- Task ID: 21
+- Title: Implement docs worker scheduled and on-demand refresh
 - Owner: Codex
 - Status: done
 - Started: 2026-05-14
 - Planned validation: complete
-- Commit intent: Add bounded refresh job queue service with allowlist policy checks, dedupe, priority scoring, recent-failure delay, queue bounds, and storage helpers.
-- Notes: Focused validation pass: `bun test tests/integration/docs/refresh/refresh-queue.test.ts`; `bun test tests/integration/storage/docs-storage.test.ts`; `bun run typecheck`. Final gates pass: `bun test` (391 pass, 17 skip); `bun run typecheck`; `bun run check` (391 pass, 17 skip). Scope excludes worker execution, actual refresh processing, and admin tools.
+- Commit intent: Add docs worker command/service for scheduled and queued refresh processing, plus non-blocking on-demand enqueue from search/page tools.
+- Notes: Focused validation pass: `bun test tests/integration/docs/refresh/docs-worker.test.ts tests/integration/docs/refresh/refresh-queue.test.ts`; `bun test tests/integration/tools/search-docs.test.ts tests/integration/tools/get-doc-page.test.ts tests/integration/tools/search-bun-docs.test.ts tests/integration/tools/search-docs-compatibility.test.ts`; `bun test tests/integration/storage/docs-storage.test.ts tests/integration/mcp/server-registration.test.ts`; `bun run typecheck`. Final gates pass: `bun test` (403 pass, 17 skip); `bun run typecheck`; `bun run check` (403 pass, 17 skip). Scope excludes Docker, admin MCP refresh tools, and model-based reranking.
 
 ## Task Status
 
@@ -74,7 +74,7 @@ Commit message requirement:
 | 18 | Implement `get_doc_page` and docs resources | done | [18](18-get-doc-page-and-doc-resources.md) |
 | 19 | Migrate `search_bun_docs` to docs retrieval compatibility wrapper | done | [19](19-search-bun-docs-compatibility.md) |
 | 20 | Add refresh job queue, dedupe, and priority scoring | done | [20](20-refresh-job-queue-and-priority.md) |
-| 21 | Implement docs worker scheduled and on-demand refresh | todo | [21](21-docs-worker-scheduled-and-demand-refresh.md) |
+| 21 | Implement docs worker scheduled and on-demand refresh | done | [21](21-docs-worker-scheduled-and-demand-refresh.md) |
 | 22 | Implement stale content and tombstone policy | todo | [22](22-tombstone-stale-policy.md) |
 | 23 | Add Docker and deployment configuration | todo | [23](23-docker-compose-deployment.md) |
 | 24 | Add final QA, documentation, and traceability | todo | [24](24-final-qa-docs-traceability.md) |
@@ -126,3 +126,5 @@ Commit message requirement:
 | 2026-05-14 | 19 | done | Routed `search_bun_docs` through the generic `search_docs` retrieval path with Bun source defaults, topic query boosts, compatibility result fields, freshness/retrieval metadata, and wrapper regression tests. Focused wrapper/generic/e2e/audit tests pass; `bun run typecheck` pass; `bun run check` pass (384 pass, 17 skipped). |
 | 2026-05-14 | 20 | in_progress | Started refresh queue task; will add failing enqueue/dedupe/priority/bounds tests before implementation. |
 | 2026-05-14 | 20 | done | Added bounded refresh job queue with allowlist policy rejection, pending/running dedupe, priority scoring, recent-failure delay, queue bounds, and storage helpers. Focused refresh/storage tests pass; `bun run typecheck` pass; `bun run check` pass (391 pass, 17 skipped). |
+| 2026-05-14 | 21 | in_progress | Started docs worker task; will add failing worker processing, scheduling, and on-demand enqueue tests before implementation. |
+| 2026-05-14 | 21 | done | Added docs worker command/service, scheduled source-index enqueue, bounded runnable job claiming, page/source/embedding/tombstone execution dispatch, failed-job error capture, and non-blocking search/page refresh enqueue. Focused worker/queue/tool/storage tests pass; `bun run typecheck` pass; `bun run check` pass (403 pass, 17 skipped). |

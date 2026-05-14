@@ -23,7 +23,7 @@ export interface RefreshQueueStoredJob {
   status: "queued" | "running" | "succeeded" | "failed" | "deduplicated";
   readonly priority: number;
   readonly runAfter: string;
-  lastError?: string;
+  lastError?: string | null;
 }
 
 export interface RefreshQueueStore {

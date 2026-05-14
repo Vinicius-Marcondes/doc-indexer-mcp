@@ -74,7 +74,7 @@ export interface DocsRetrievalResult {
   readonly freshness: DocsRetrievalFreshness;
   readonly confidence: RetrievalConfidence;
   readonly lowConfidence: boolean;
-  readonly refreshQueued: false;
+  readonly refreshQueued: boolean;
   readonly refreshReason?: DocsRefreshReason;
   readonly retrieval: DocsRetrievalMetadata;
   readonly warnings: readonly DocsRetrievalWarning[];

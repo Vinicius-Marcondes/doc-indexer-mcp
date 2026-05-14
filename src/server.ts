@@ -66,6 +66,8 @@ import { HybridDocsRetrieval } from "./docs/retrieval/hybrid-retrieval";
 import { createOpenAiEmbeddingProviderFromConfig } from "./docs/embeddings/openai-provider";
 import { defaultDocsSourceRegistry } from "./docs/sources/bun-source-pack";
 import type { DocsSourceRegistry } from "./docs/sources/registry";
+import { RefreshJobQueue } from "./docs/refresh/refresh-queue";
+import type { SearchDocsRefreshQueue } from "./tools/search-docs";
 
 export interface ServerMetadata {
   readonly name: string;
@@ -89,6 +91,7 @@ export interface ServerDependencies {
   readonly docsSourceRegistry: DocsSourceRegistry;
   readonly docsRetrieval?: SearchDocsRetrieval;
   readonly docsPageStore?: DocsPageStore;
+  readonly docsRefreshQueue?: SearchDocsRefreshQueue;
   readonly docsSearchDefaults: {
     readonly defaultLimit: number;
     readonly maxLimit: number;
@@ -106,6 +109,7 @@ export interface ServerDependencyOptions {
   readonly docsSourceRegistry?: DocsSourceRegistry;
   readonly docsRetrieval?: SearchDocsRetrieval;
   readonly docsPageStore?: DocsPageStore;
+  readonly docsRefreshQueue?: SearchDocsRefreshQueue;
   readonly docsSearchDefaults?: {
     readonly defaultLimit: number;
     readonly maxLimit: number;
@@ -311,6 +315,7 @@ const toolRegistrations: ToolRegistration[] = [
       searchBunDocs(input, {
         retrieval: dependencies.docsRetrieval,
         sourceRegistry: dependencies.docsSourceRegistry,
+        refreshQueue: dependencies.docsRefreshQueue,
         now: dependencies.now,
         defaultLimit: dependencies.docsSearchDefaults.defaultLimit,
         maxLimit: dependencies.docsSearchDefaults.maxLimit
@@ -344,6 +349,7 @@ const searchDocsRegistration: ToolRegistration = {
     searchDocs(input, {
       retrieval: dependencies.docsRetrieval,
       sourceRegistry: dependencies.docsSourceRegistry,
+      refreshQueue: dependencies.docsRefreshQueue,
       now: dependencies.now,
       defaultLimit: dependencies.docsSearchDefaults.defaultLimit,
       maxLimit: dependencies.docsSearchDefaults.maxLimit
@@ -357,6 +363,7 @@ const getDocPageRegistration: ToolRegistration = {
   handler: (input, dependencies) =>
     getDocPage(input, {
       pageStore: dependencies.docsPageStore,
+      refreshQueue: dependencies.docsRefreshQueue,
       sourceRegistry: dependencies.docsSourceRegistry,
       now: dependencies.now
     })
@@ -670,6 +677,7 @@ export function createServerDependencies(options: ServerDependencyOptions = {}):
     docsSourceRegistry: options.docsSourceRegistry ?? defaultDocsSourceRegistry,
     ...(options.docsRetrieval === undefined ? {} : { docsRetrieval: options.docsRetrieval }),
     ...(options.docsPageStore === undefined ? {} : { docsPageStore: options.docsPageStore }),
+    ...(options.docsRefreshQueue === undefined ? {} : { docsRefreshQueue: options.docsRefreshQueue }),
     docsSearchDefaults: options.docsSearchDefaults ?? { defaultLimit: 5, maxLimit: 20 },
     auditLogger: options.auditLogger ?? createAuditLogger({ env: options.env, now }),
     now
@@ -694,6 +702,13 @@ export function createRemoteDocsServerDependencies(
     maxLimit: config.search.maxLimit
   });
   const storage = new RemoteDocsStorage(sql);
+  const docsRefreshQueue = new RefreshJobQueue({
+    store: storage,
+    sourceRegistry: options.docsSourceRegistry ?? defaultDocsSourceRegistry,
+    now: options.now ?? (() => new Date().toISOString()),
+    maxPendingJobs: Math.max(config.refresh.maxPagesPerRun + config.refresh.maxEmbeddingsPerRun, 100),
+    maxPendingJobsPerSource: Math.max(config.refresh.maxPagesPerRun, 100)
+  });
   const docsRetrieval = new HybridDocsRetrieval({
     keywordRetrieval,
     vectorRetrieval,
@@ -706,6 +721,7 @@ export function createRemoteDocsServerDependencies(
     ...options,
     docsRetrieval,
     docsPageStore: storage,
+    docsRefreshQueue,
     docsSourceRegistry: options.docsSourceRegistry ?? defaultDocsSourceRegistry,
     docsSearchDefaults: config.search
   });

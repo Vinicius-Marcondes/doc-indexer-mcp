@@ -121,7 +121,7 @@ export interface StoredDocsPageOutput {
   readonly indexedAt: string;
   readonly contentHash: string;
   readonly freshness: DocsContentFreshness;
-  readonly refreshQueued: false;
+  readonly refreshQueued: boolean;
   readonly refreshReason?: "stale_content";
   readonly warnings: readonly DocsResourceWarning[];
   readonly sources: readonly SourceCitation[];
@@ -139,7 +139,7 @@ export interface MissingDocsPageOutput {
   readonly indexedAt: null;
   readonly contentHash: null;
   readonly freshness: "missing";
-  readonly refreshQueued: false;
+  readonly refreshQueued: boolean;
   readonly refreshReason: "missing_content";
   readonly warnings: readonly DocsResourceWarning[];
   readonly sources: readonly [];

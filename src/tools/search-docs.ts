@@ -7,6 +7,7 @@ import type {
 } from "../docs/retrieval/hybrid-retrieval";
 import { defaultDocsSourceRegistry } from "../docs/sources/bun-source-pack";
 import type { DocsSourceRegistry } from "../docs/sources/registry";
+import type { EnqueueRefreshJobInput, EnqueueRefreshJobResult } from "../docs/refresh/refresh-queue";
 
 const searchDocsModeSchema = z.enum(["hybrid", "keyword", "semantic"]);
 
@@ -24,8 +25,13 @@ export interface SearchDocsRetrieval {
   readonly search: (input: DocsRetrievalInput) => Promise<DocsRetrievalResult>;
 }
 
+export interface SearchDocsRefreshQueue {
+  readonly enqueue: (input: EnqueueRefreshJobInput) => Promise<EnqueueRefreshJobResult>;
+}
+
 export interface SearchDocsDependencies {
   readonly retrieval?: SearchDocsRetrieval;
+  readonly refreshQueue?: SearchDocsRefreshQueue;
   readonly sourceRegistry?: DocsSourceRegistry;
   readonly now: () => string;
   readonly defaultLimit: number;
@@ -84,6 +90,48 @@ function missingRetrievalError(): StructuredError {
   return createStructuredError("internal_error", "Docs retrieval service is not configured.");
 }
 
+function refreshInputForResult(
+  result: DocsRetrievalResult,
+  forceRefresh: boolean
+): EnqueueRefreshJobInput | null {
+  const reason = forceRefresh ? "manual" : result.refreshReason;
+
+  if (reason === undefined) {
+    return null;
+  }
+
+  const stalePage = reason === "stale_content" ? result.results[0] : undefined;
+
+  return {
+    sourceId: result.sourceId,
+    ...(stalePage === undefined
+      ? { jobType: "source_index" as const }
+      : { url: stalePage.url, jobType: "page" as const }),
+    reason,
+    prioritySignals: {
+      recentRequestCount: 1,
+      ...(result.freshness === "stale" ? { staleHitCount: 1 } : {}),
+      ...(result.lowConfidence ? { lowConfidenceSearchCount: 1 } : {})
+    }
+  };
+}
+
+async function enqueueRefresh(
+  refreshQueue: SearchDocsRefreshQueue | undefined,
+  input: EnqueueRefreshJobInput | null
+): Promise<boolean> {
+  if (refreshQueue === undefined || input === null) {
+    return false;
+  }
+
+  try {
+    const result = await refreshQueue.enqueue(input);
+    return result.status === "queued";
+  } catch {
+    return false;
+  }
+}
+
 export async function searchDocs(input: unknown, dependencies: SearchDocsDependencies): Promise<SearchDocsResult> {
   const parsed = searchDocsInputSchema.safeParse(input);
 
@@ -130,6 +178,10 @@ export async function searchDocs(input: unknown, dependencies: SearchDocsDepende
     limit,
     mode: parsed.data.mode ?? "hybrid"
   });
+  const refreshQueued = await enqueueRefresh(
+    dependencies.refreshQueue,
+    refreshInputForResult(retrievalResult, parsed.data.forceRefresh ?? false)
+  );
 
   return {
     ok: true,
@@ -142,7 +194,7 @@ export async function searchDocs(input: unknown, dependencies: SearchDocsDepende
     sources: buildSources(retrievalResult),
     freshness: retrievalResult.freshness,
     confidence: retrievalResult.confidence,
-    refreshQueued: retrievalResult.refreshQueued,
+    refreshQueued,
     ...(retrievalResult.refreshReason === undefined ? {} : { refreshReason: retrievalResult.refreshReason }),
     retrieval: retrievalResult.retrieval,
     warnings: retrievalResult.warnings

@@ -2,6 +2,7 @@ import * as z from "zod/v4";
 import { createInvalidInputError, createStructuredError, type StructuredError } from "../shared/errors";
 import { defaultDocsSourceRegistry } from "../docs/sources/bun-source-pack";
 import type { DocsSourceRegistry } from "../docs/sources/registry";
+import type { EnqueueRefreshJobInput, EnqueueRefreshJobResult } from "../docs/refresh/refresh-queue";
 import {
   missingDocsPage,
   storedDocsPageOutput,
@@ -20,6 +21,9 @@ export const getDocPageInputSchema = z
 
 export interface GetDocPageDependencies {
   readonly pageStore?: DocsPageStore;
+  readonly refreshQueue?: {
+    readonly enqueue: (input: EnqueueRefreshJobInput) => Promise<EnqueueRefreshJobResult>;
+  };
   readonly sourceRegistry?: DocsSourceRegistry;
   readonly now: () => string;
 }
@@ -33,6 +37,22 @@ export type GetDocPageResult = StoredDocsPageOutput | MissingDocsPageOutput | Ge
 
 function missingStoreError(): StructuredError {
   return createStructuredError("internal_error", "Docs page store is not configured.");
+}
+
+async function enqueuePageRefresh(
+  dependencies: GetDocPageDependencies,
+  input: EnqueueRefreshJobInput
+): Promise<boolean> {
+  if (dependencies.refreshQueue === undefined) {
+    return false;
+  }
+
+  try {
+    const result = await dependencies.refreshQueue.enqueue(input);
+    return result.status === "queued";
+  } catch {
+    return false;
+  }
 }
 
 export async function getDocPage(input: unknown, dependencies: GetDocPageDependencies): Promise<GetDocPageResult> {
@@ -84,17 +104,49 @@ export async function getDocPage(input: unknown, dependencies: GetDocPageDepende
   const page = await dependencies.pageStore.getPageByUrl({ sourceId, url: canonicalUrl });
 
   if (page === null) {
-    return missingDocsPage({
+    const refreshQueued = await enqueuePageRefresh(dependencies, {
       sourceId,
       url: canonicalUrl,
-      generatedAt: dependencies.now()
+      jobType: "page",
+      reason: parsed.data.forceRefresh === true ? "manual" : "missing_content",
+      prioritySignals: {
+        staleHitCount: 1
+      }
     });
+
+    return {
+      ...missingDocsPage({
+        sourceId,
+        url: canonicalUrl,
+        generatedAt: dependencies.now()
+      }),
+      refreshQueued
+    };
   }
 
   const chunks = await dependencies.pageStore.getChunksForPage(page.id);
-  return storedDocsPageOutput({
+  const output = storedDocsPageOutput({
     page,
     chunks,
     generatedAt: dependencies.now()
   });
+
+  if (output.freshness !== "stale" && parsed.data.forceRefresh !== true) {
+    return output;
+  }
+
+  const refreshQueued = await enqueuePageRefresh(dependencies, {
+    sourceId,
+    url: canonicalUrl,
+    jobType: "page",
+    reason: parsed.data.forceRefresh === true ? "manual" : "stale_content",
+    prioritySignals: {
+      staleHitCount: output.freshness === "stale" ? 1 : 0
+    }
+  });
+
+  return {
+    ...output,
+    refreshQueued
+  };
 }
