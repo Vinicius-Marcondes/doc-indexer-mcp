@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: None
 - Planned validation: None
 - Commit intent: None
-- Notes: Task 08 is complete and ready to commit.
+- Notes: Task 09 is complete and ready to commit.
 
 ## Task Status
 
@@ -62,7 +62,7 @@ Commit message requirement:
 | 06 | Add Postgres and pgvector migrations | done | [06](06-postgres-pgvector-schema-migrations.md) |
 | 07 | Add database access layer and test harness | done | [07](07-database-test-harness-and-storage-access.md) |
 | 08 | Define source-pack contract and Bun allowlist | done | [08](08-source-pack-contract-and-bun-allowlist.md) |
-| 09 | Implement Bun docs discovery, fetch, and normalization | todo | [09](09-bun-docs-discovery-fetch-normalization.md) |
+| 09 | Implement Bun docs discovery, fetch, and normalization | done | [09](09-bun-docs-discovery-fetch-normalization.md) |
 | 10 | Implement documentation chunking and hashing | todo | [10](10-doc-chunking-and-hashing.md) |
 | 11 | Add embedding provider contract and deterministic fake provider | todo | [11](11-embedding-provider-interface-and-fake.md) |
 | 12 | Add OpenAI embedding provider | todo | [12](12-openai-embedding-provider.md) |
@@ -102,3 +102,5 @@ Commit message requirement:
 | 2026-05-14 | 07 | done | Added typed docs storage access, migration runner, DB readiness helper, and isolated Postgres test harness. Focused storage/Hono tests pass; real storage integration is gated/skipped without `TEST_DATABASE_URL`; `bun run typecheck` pass; `bun run check` pass (316 pass, 4 skipped). |
 | 2026-05-14 | 08 | in_progress | Started source-pack task; will add failing Bun allowlist/registry tests before implementation. |
 | 2026-05-14 | 08 | done | Added docs source-pack contract, Bun source pack allowlist, redirect revalidation, and source registry. Focused source-pack and existing allowlist tests pass; `bun run typecheck` pass; `bun run check` pass (324 pass, 4 skipped). |
+| 2026-05-14 | 09 | in_progress | Started Bun docs discovery/fetch/normalization task; will add failing normalizer and mocked discovery tests before implementation. |
+| 2026-05-14 | 09 | done | Added injectable Bun docs discovery, page fetch, final-URL revalidation, and deterministic markdown/HTML normalization. Focused new and existing Bun docs adapter tests pass; `bun run typecheck` pass; `bun run check` pass (333 pass, 4 skipped). |
