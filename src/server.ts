@@ -456,6 +456,12 @@ const resourceRegistrations: ResourceRegistration[] = [
   }
 ];
 
+const remoteDocsToolNames = new Set(["search_bun_docs"]);
+const remoteDocsResourceNames = new Set([bunDocsIndexResource.name, bunDocsPageResourceTemplate.name]);
+
+const remoteDocsToolRegistrations = toolRegistrations.filter((tool) => remoteDocsToolNames.has(tool.name));
+const remoteDocsResourceRegistrations = resourceRegistrations.filter((resource) => remoteDocsResourceNames.has(resource.name));
+
 export function createServerDependencies(options: ServerDependencyOptions = {}): ServerDependencies {
   const now = options.now ?? (() => new Date().toISOString());
   const cachePath = options.cachePath ?? defaultCachePath();
@@ -487,14 +493,17 @@ export function createServerDependencies(options: ServerDependencyOptions = {}):
   };
 }
 
-export function getServerCapabilityManifest(): ServerCapabilityManifest {
+function capabilityManifestFor(
+  tools: readonly ToolRegistration[],
+  resources: readonly ResourceRegistration[]
+): ServerCapabilityManifest {
   return {
-    tools: toolRegistrations.map((tool) => ({
+    tools: tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: tool.inputSchema
     })),
-    resources: resourceRegistrations.map((resource) => ({
+    resources: resources.map((resource) => ({
       name: resource.name,
       description: resource.description,
       mimeType: resource.mimeType,
@@ -504,11 +513,21 @@ export function getServerCapabilityManifest(): ServerCapabilityManifest {
   };
 }
 
-export function registerBunDevIntelCapabilities(
+export function getServerCapabilityManifest(): ServerCapabilityManifest {
+  return capabilityManifestFor(toolRegistrations, resourceRegistrations);
+}
+
+export function getRemoteDocsCapabilityManifest(): ServerCapabilityManifest {
+  return capabilityManifestFor(remoteDocsToolRegistrations, remoteDocsResourceRegistrations);
+}
+
+function registerCapabilities(
   registrar: BunDevIntelRegistrar,
-  dependencies: ServerDependencies
+  dependencies: ServerDependencies,
+  tools: readonly ToolRegistration[],
+  resources: readonly ResourceRegistration[]
 ): void {
-  for (const tool of toolRegistrations) {
+  for (const tool of tools) {
     registrar.registerTool(
       tool.name,
       {
@@ -544,9 +563,23 @@ export function registerBunDevIntelCapabilities(
     );
   }
 
-  for (const resource of resourceRegistrations) {
+  for (const resource of resources) {
     resource.register(registrar, dependencies);
   }
+}
+
+export function registerBunDevIntelCapabilities(
+  registrar: BunDevIntelRegistrar,
+  dependencies: ServerDependencies
+): void {
+  registerCapabilities(registrar, dependencies, toolRegistrations, resourceRegistrations);
+}
+
+export function registerRemoteDocsCapabilities(
+  registrar: BunDevIntelRegistrar,
+  dependencies: ServerDependencies
+): void {
+  registerCapabilities(registrar, dependencies, remoteDocsToolRegistrations, remoteDocsResourceRegistrations);
 }
 
 export interface CreateBunDevIntelServerOptions {

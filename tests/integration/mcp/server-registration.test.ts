@@ -5,8 +5,10 @@ import { resolve } from "node:path";
 import {
   createBunDevIntelServer,
   createServerDependencies,
+  getRemoteDocsCapabilityManifest,
   getServerCapabilityManifest,
   registerBunDevIntelCapabilities,
+  registerRemoteDocsCapabilities,
   serverMetadata
 } from "../../../src/server";
 
@@ -155,5 +157,44 @@ describe("MCP server registration", () => {
 
     expect(manifest.tools.find((tool) => tool.name === "project_health")?.description).toContain("brief");
     expect(manifest.tools.find((tool) => tool.name === "check_before_install")?.description).toContain("before");
+  });
+
+  test("remote docs manifest can be built without DB or network startup", () => {
+    const manifest = getRemoteDocsCapabilityManifest();
+
+    expect(manifest.tools.map((tool) => tool.name)).toEqual(["search_bun_docs"]);
+    expect(manifest.resources.map((resource) => resource.name)).toEqual(["bun-docs-index", "bun-docs-page"]);
+  });
+
+  test("remote docs manifest excludes project path inputs and local project resources", () => {
+    const manifest = getRemoteDocsCapabilityManifest();
+
+    for (const tool of manifest.tools) {
+      expect(standardSchemaInputKeys(tool.inputSchema)).not.toContain("projectPath");
+    }
+
+    expect(manifest.resources.map((resource) => resource.name)).not.toContain("bun-project-analysis");
+    expect(manifest.resources.map((resource) => resource.name)).not.toContain("bun-project-findings");
+  });
+
+  test("remote docs registration is docs-only and does not fetch at registration time", () => {
+    const registrar = new RecordingRegistrar();
+    let fetchCount = 0;
+
+    registerRemoteDocsCapabilities(
+      registrar,
+      createServerDependencies({
+        cachePath: tempCachePath(),
+        fetchImpl: async () => {
+          fetchCount += 1;
+          return new Response("", { status: 200 });
+        },
+        now: () => "2026-05-12T10:00:00.000Z"
+      })
+    );
+
+    expect(fetchCount).toBe(0);
+    expect(registrar.tools.map((tool) => tool.name)).toEqual(["search_bun_docs"]);
+    expect(registrar.resources.map((resource) => resource.name)).toEqual(["bun-docs-index", "bun-docs-page"]);
   });
 });
