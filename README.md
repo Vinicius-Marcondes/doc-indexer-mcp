@@ -1,83 +1,132 @@
-# Bun Dev Intelligence MCP Server
+# Bun Dev Intel Remote Docs MCP
 
-Source-backed MCP server for Bun project intelligence. It analyzes local Bun/TypeScript projects, searches official Bun docs, plans Bun dependency commands, and exposes read-only MCP resources.
+`bun-dev-intel-remote-docs-mcp` is a docs-only Model Context Protocol (MCP) service for searching and retrieving official documentation over Streamable HTTP.
 
-## Run
+It indexes allowlisted documentation sources, stores pages and chunks in Postgres with pgvector embeddings, and exposes source-backed MCP tools that agents can call remotely.
 
-Use Bun as the runtime:
+## What This Repository Owns
+
+- A Streamable HTTP MCP endpoint at `/mcp`.
+- Health and readiness endpoints at `/healthz` and `/readyz`.
+- Remote docs tools: `search_docs`, `get_doc_page`, and `search_bun_docs`.
+- MCP resources for indexed sources, pages, chunks, and Bun docs compatibility.
+- Bun docs discovery, normalization, chunking, embedding, retrieval, refresh, and tombstone handling.
+- Docker and Compose setup for the HTTP server, docs worker, and Postgres/pgvector.
+
+This repository does not include local project analysis, stdio MCP transport, or an admin console. Those concerns are intentionally split into separate repositories.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  Client["MCP client"] --> HTTP["Hono HTTP app\n/mcp"]
+  HTTP --> Server["MCP capability registry"]
+  Server --> Tools["Docs tools and resources"]
+  Tools --> Retrieval["Hybrid retrieval\nkeyword + vector"]
+  Retrieval --> Postgres["Postgres + pgvector"]
+  Worker["Docs worker"] --> Queue["Refresh queue"]
+  Queue --> Ingestion["Discovery + ingestion"]
+  Ingestion --> Sources["Allowlisted docs sources"]
+  Ingestion --> Postgres
+```
+
+Request handling stays focused on authenticated MCP traffic. Refresh, embedding, and tombstone work runs through the worker so slow source updates do not block tool calls.
+
+## MCP Surface
+
+### Tools
+
+- `search_docs`: searches indexed official docs with keyword, semantic, or hybrid retrieval.
+- `get_doc_page`: returns one stored allowlisted page and its indexed chunks.
+- `search_bun_docs`: compatibility wrapper for Bun documentation search, backed by the same remote retrieval path.
+
+### Resources
+
+- `docs://sources`: enabled source packs and indexed counts.
+- `docs://page/{sourceId}/{pageId}`: one stored documentation page.
+- `docs://chunk/{sourceId}/{chunkId}`: one stored documentation chunk.
+- Bun docs compatibility resources for the legacy Bun docs index/page shape.
+
+## Source Policy
+
+V1 indexes only official Bun documentation:
+
+- `https://bun.com/docs/llms.txt`
+- `https://bun.com/docs/llms-full.txt`
+- pages under `https://bun.com/docs/`
+
+The source pack rejects non-HTTPS URLs, disallowed hosts, encoded path traversal tricks, and redirects outside the same allowlisted policy. Adding another external source should include source-pack policy changes, documentation updates, and tests.
+
+## Prerequisites
+
+- Bun
+- Docker and Docker Compose for the bundled local stack
+- An OpenAI API key, or an OpenAI-compatible embedding endpoint
+- Postgres with pgvector when running without Compose
+
+The current vector schema stores 1536-dimensional embeddings. Use an embedding model or endpoint configured for 1536 dimensions unless the schema and validation are changed together.
+
+## Configuration
+
+Copy the example env file and replace all placeholders:
 
 ```bash
-bun src/stdio.ts
+cp .env.example .env
 ```
 
-Example MCP client configuration:
+Important variables:
 
-```json
-{
-  "mcpServers": {
-    "bun-dev-intel": {
-      "command": "bun",
-      "args": ["/Users/vinicius/Projects/Coding Colsultancy/src/stdio.ts"]
-    }
-  }
-}
-```
+| Variable | Purpose |
+| --- | --- |
+| `MCP_HTTP_HOST` / `MCP_HTTP_PORT` | HTTP bind address and port. |
+| `MCP_BEARER_TOKEN` | Required bearer token for `/mcp`. Use a long random secret outside test mode. |
+| `DATABASE_URL` | Postgres connection string. |
+| `EMBEDDING_PROVIDER` | Must be `openai` in V1. |
+| `OPENAI_API_KEY` | API key for OpenAI or an OpenAI-compatible endpoint. |
+| `OPENAI_EMBEDDING_MODEL` | Embedding model name. |
+| `OPENAI_BASE_URL` | Optional OpenAI-compatible `/v1` endpoint. |
+| `OPENAI_EMBEDDING_DIMENSIONS` | Optional requested embedding size; currently must be `1536` when set. |
+| `DOCS_ALLOWED_ORIGINS` | Optional comma-separated browser origins allowed to call `/mcp`. |
+| `DOCS_REFRESH_INTERVAL` | Scheduled refresh interval, such as `7d`, `12h`, or `30m`. |
 
-Claude Desktop with tool-call audit logging:
+## Run With Docker Compose
 
-```json
-{
-  "mcpServers": {
-    "bun-dev-intel": {
-      "command": "/Users/vinicius/.local/share/mise/installs/bun/1.3.11/bin/bun",
-      "args": ["/Users/vinicius/Projects/Coding Colsultancy/src/stdio.ts"],
-      "env": {
-        "BUN_DEV_INTEL_MCP_AUDIT_LOG": "/tmp/bun-dev-intel-mcp.jsonl",
-        "BUN_DEV_INTEL_MCP_LOG_LEVEL": "INFO"
-      }
-    }
-  }
-}
-```
-
-Monitor tool calls:
+Start the HTTP server, docs worker, and Postgres/pgvector:
 
 ```bash
-tail -f /tmp/bun-dev-intel-mcp.jsonl
+docker compose --env-file .env up --build
 ```
 
-## Remote Docs HTTP
-
-The project also includes a remote docs-only MCP server over Streamable HTTP for shared documentation search. It runs separately from local stdio:
-
-- local stdio: local project analysis and filesystem-aware tools.
-- remote HTTP: docs-only tools at `/mcp` with bearer-token auth.
-
-Run the HTTP server and worker:
+Run migrations before first use and after schema changes:
 
 ```bash
+docker compose --env-file .env run --rm mcp-http-server \
+  bun -e 'import { createPostgresClient, runRemoteDocsMigrations } from "./src/docs/storage/database.ts"; const sql = createPostgresClient(Bun.env.DATABASE_URL); await runRemoteDocsMigrations(sql); await sql.end?.({ timeout: 1 });'
+```
+
+Default local endpoints:
+
+```text
+GET  http://localhost:3000/healthz
+GET  http://localhost:3000/readyz
+POST http://localhost:3000/mcp
+```
+
+## Run Without Docker
+
+Install dependencies, provide the same environment variables, and run the server and worker as separate processes:
+
+```bash
+bun install
 bun src/http.ts
 bun src/docs-worker.ts
 ```
 
-For local Docker, start the HTTP server, worker, and Postgres stack:
+When running manually, make sure Postgres has pgvector enabled and the migrations under `migrations/remote-docs/` have been applied.
 
-```bash
-cp .env.remote-docs.example .env.remote-docs
-docker compose -f docker-compose.remote-docs.yml --env-file .env.remote-docs up --build
-```
+## Connect An MCP Client
 
-Start the optional admin web interface only when an operator needs the browser UI:
-
-```bash
-docker compose -f docker-compose.remote-docs.yml --env-file .env.remote-docs --profile admin up --build
-```
-
-The admin console is a separate Hono service at `http://localhost:3100` by default. It serves the built React 19/Vite app and same-origin `/api/admin/*` routes, uses email/password sessions with `admin` and `viewer` roles, and connects directly to the remote docs Postgres database. The MCP HTTP bearer token is only for `/mcp`, not for the admin browser session.
-
-### Connect An AI Agent Over HTTP
-
-Configure the agent's MCP client to use Streamable HTTP at the `/mcp` endpoint. The exact config keys vary by agent runtime, but the connection details are:
+Configure clients for Streamable HTTP:
 
 ```text
 Transport: Streamable HTTP
@@ -85,13 +134,7 @@ URL: https://your-host.example.com/mcp
 Authorization: Bearer <MCP_BEARER_TOKEN>
 ```
 
-Local development URL:
-
-```text
-http://localhost:3000/mcp
-```
-
-Generic MCP client configuration shape:
+Generic configuration shape:
 
 ```json
 {
@@ -107,9 +150,7 @@ Generic MCP client configuration shape:
 }
 ```
 
-If your agent separates transport type from URL, select `streamable-http` or `http` transport and use the same `/mcp` URL. MCP clients normally set protocol headers for you; raw HTTP callers must send `Accept: application/json, text/event-stream` and `Content-Type: application/json` for JSON-RPC POST requests.
-
-Example raw initialize request:
+Raw initialize request:
 
 ```bash
 curl -sS https://your-host.example.com/mcp \
@@ -119,111 +160,18 @@ curl -sS https://your-host.example.com/mcp \
   --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"example-agent","version":"0.0.0"}}}'
 ```
 
-Do not configure remote agents with the local stdio command unless they need local project analysis. The HTTP server is docs-only and exposes `search_docs`, `get_doc_page`, and `search_bun_docs`.
+## Security Notes
 
-### Configure Embeddings
-
-The remote docs service uses embeddings for semantic and hybrid search. The default production setup is OpenAI:
-
-```text
-EMBEDDING_PROVIDER=openai
-OPENAI_API_KEY=<openai-api-key>
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-```
-
-To use a local OpenAI-compatible embedding server, keep `EMBEDDING_PROVIDER=openai` and point the OpenAI client at the local `/v1` endpoint:
-
-```text
-EMBEDDING_PROVIDER=openai
-OPENAI_BASE_URL=http://localhost:11434/v1
-OPENAI_API_KEY=local-placeholder-key
-OPENAI_EMBEDDING_MODEL=qwen3-embedding
-OPENAI_EMBEDDING_DIMENSIONS=1536
-```
-
-When running through Docker Compose on macOS, use the host gateway name instead of `localhost`:
-
-```text
-OPENAI_BASE_URL=http://host.docker.internal:11434/v1
-```
-
-The local server must expose an OpenAI-compatible `POST /v1/embeddings` API. The current pgvector schema stores 1536-dimension vectors, so use a local embedding model or endpoint configuration that returns 1536-dimensional embeddings. For models that support configurable output size, keep `OPENAI_EMBEDDING_DIMENSIONS=1536`.
-
-Docker, compose, auth, refresh, embedding provider, and source-policy details are in [docs/deployment/remote-docs-http.md](docs/deployment/remote-docs-http.md).
-
-## Safety
-
-- The server is read-only for analyzed projects.
-- It does not execute shell commands from tool handlers.
-- It does not install dependencies or mutate lockfiles.
-- V2 `actions` are structured recommendations only. Any command or edit action is approval-gated with `requiresApproval: true`.
-- It skips `node_modules`, build output, binary files, and secret-like files during project analysis.
-- Local project-analysis tools use stdio transport. Remote docs tools use Streamable HTTP at `/mcp` and remain docs-only.
-- Audit logging is off by default, writes only to the configured file, never writes to stdout, and skips writes when the audit path is inside the analyzed project.
-
-## Which Tool Should An Agent Call?
-
-Prefer the V2 task-shaped tools for normal coding workflows:
-
-| Agent task | Tool | Default output |
-| --- | --- | --- |
-| Quick project scan before editing | `project_health` | Brief V2 envelope with ranked findings, actions, citations, and a `deltaToken`. |
-| Check a package before editing dependencies | `check_before_install` | Brief npm-backed findings and an approval-gated Bun install command action. |
-| Check whether a Bun API or pattern is current | `check_bun_api_usage` | Brief docs-backed answer with at most one cited example. |
-| Check one file before editing | `lint_bun_file` | Brief file-scoped Bun findings with locations when available. |
-| Full raw project dump for diagnostics | `analyze_bun_project` | Compatibility/full analysis surface; use only when raw facts are needed. |
-| Legacy project review | `review_bun_project` | Legacy shape by default; pass `responseMode` to opt into the V2 envelope. |
-| Legacy dependency planner | `plan_bun_dependency` | Legacy shape by default; pass `responseMode` to include structured actions. |
-
-Response modes:
-
-- `brief`: compact default for V2 tools, summary <= 500 characters, limited findings/actions.
-- `standard`: more context, summary <= 1200 characters, still citation-compacted.
-- `full`: opt-in detail for the requested tool. Full raw project analysis remains under `analyze_bun_project`.
-
-V2 outputs use a top-level `citations` map. Findings, actions, examples, and warnings reference citation IDs instead of repeating full source URLs. Local project evidence is represented as safe `local-project:*` citations and never includes secret file contents.
-
-Migration note: agents that previously called `review_bun_project` for every planning step should call `project_health` first. Use `review_bun_project` only for compatibility with existing clients, or pass `responseMode: "brief"` to receive the V2 envelope while keeping the old tool name.
-
-## Audit Logging
-
-Tool-call audit logging is controlled by environment variables:
-
-```text
-BUN_DEV_INTEL_MCP_AUDIT_LOG=/absolute/path/to/bun-dev-intel-mcp.jsonl
-BUN_DEV_INTEL_MCP_LOG_LEVEL=NONE|INFO|DEBUG|TRACE
-```
-
-Log levels:
-
-- `NONE`: no audit events. This is the default when the level is missing.
-- `INFO`: tool call start/end metadata, status, and duration.
-- `DEBUG`: `INFO` plus input and result summaries.
-- `TRACE`: full tool input, full structured result, and sanitized errors without stack traces.
-
-## Cache
-
-Default cache file:
-
-```text
-~/.cache/bun-dev-intel-mcp/cache.sqlite
-```
-
-The cache stores fetched official Bun docs, npm metadata, and V2 normalized finding snapshots. Project analysis resources are in-memory for the current server process and are marked stale when source file hashes change. The V2 findings resource is exposed at `bun-project://findings/{projectHash}` after a V2 project-health run has populated findings for that project.
-
-## Sources
-
-Default tests are offline and deterministic. Live source checks are opt-in:
-
-```bash
-LIVE_DOCS=1 bun test tests/live
-```
-
-Live tests only hit official Bun docs and the npm registry.
+- `/mcp` requires bearer-token authentication.
+- Bearer tokens in query strings are rejected.
+- Request origins can be restricted with `DOCS_ALLOWED_ORIGINS`.
+- Request bodies are size-limited.
+- Source fetching is constrained by allowlisted source packs.
+- The worker logs sanitized failure details and avoids logging raw source content or secrets.
 
 ## Quality
 
-Required local gates:
+Default checks are deterministic and offline:
 
 ```bash
 bun test
@@ -231,4 +179,10 @@ bun run typecheck
 bun run check
 ```
 
-`bun run check` runs `bun test && bun run typecheck`.
+Live Bun documentation checks are opt-in:
+
+```bash
+LIVE_DOCS=1 bun test tests/live
+```
+
+Deployment details, refresh behavior, monitoring queries, and source-policy notes are in [docs/deployment/remote-docs-http.md](docs/deployment/remote-docs-http.md).

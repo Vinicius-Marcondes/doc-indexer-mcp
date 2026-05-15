@@ -29,10 +29,10 @@ describe("project scaffold", () => {
     expect(packageJson.scripts?.dev).toContain("bun");
     expect(packageJson.scripts?.start).toBeUndefined();
     expect(packageJson.dependencies?.["@modelcontextprotocol/server"]).toBe("2.0.0-alpha.2");
-    expect(packageJson.dependencies?.["@modelcontextprotocol/hono"]).toBe("2.0.0-alpha.2");
     expect(packageJson.dependencies?.hono).toBeDefined();
     expect(packageJson.dependencies?.postgres).toBeDefined();
     expect(packageJson.dependencies?.openai).toBeDefined();
+    expect(packageJson.dependencies?.["@modelcontextprotocol/hono"]).toBeUndefined();
   });
 
   test("provides a parseable Bun-compatible tsconfig", () => {
@@ -59,13 +59,15 @@ describe("project scaffold", () => {
     expect(existsSync(resolve(rootDir, "src"))).toBe(true);
     expect(existsSync(resolve(rootDir, "src/tools"))).toBe(true);
     expect(existsSync(resolve(rootDir, "src/resources"))).toBe(true);
-    expect(existsSync(resolve(rootDir, "src/analyzers"))).toBe(true);
+    expect(existsSync(resolve(rootDir, "src/docs"))).toBe(true);
+    expect(existsSync(resolve(rootDir, "src/http"))).toBe(true);
     expect(existsSync(resolve(rootDir, "src/sources"))).toBe(true);
     expect(existsSync(resolve(rootDir, "src/cache"))).toBe(true);
     expect(existsSync(resolve(rootDir, "src/shared"))).toBe(true);
     expect(existsSync(resolve(rootDir, "tests/unit"))).toBe(true);
     expect(existsSync(resolve(rootDir, "tests/integration"))).toBe(true);
-    expect(existsSync(resolve(rootDir, "tests/fixtures"))).toBe(true);
+    expect(existsSync(resolve(rootDir, "src/analyzers"))).toBe(false);
+    expect(existsSync(resolve(rootDir, "apps/admin-console"))).toBe(false);
   });
 
   test("documents the remote docs HTTP dependency plan", () => {
@@ -76,7 +78,6 @@ describe("project scaffold", () => {
     const packagePlan = readFileSync(packagePlanPath, "utf8");
 
     expect(packagePlan).toContain("@modelcontextprotocol/server");
-    expect(packagePlan).toContain("@modelcontextprotocol/hono");
     expect(packagePlan).toContain("hono");
     expect(packagePlan).toContain("postgres");
     expect(packagePlan).toContain("openai");

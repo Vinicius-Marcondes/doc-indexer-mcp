@@ -21,7 +21,7 @@ services:
     command: bun src/http.ts
     restart: unless-stopped
     env_file:
-      - .env.remote-docs
+      - .env
     environment:
       MCP_HTTP_HOST: 0.0.0.0
       MCP_HTTP_PORT: 3000
@@ -49,40 +49,12 @@ services:
       done'
     restart: unless-stopped
     env_file:
-      - .env.remote-docs
+      - .env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-bun_dev_intel}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres-pgvector:5432/${POSTGRES_DB:-bun_dev_intel}
     depends_on:
       postgres-pgvector:
         condition: service_healthy
-
-  admin-console:
-    profiles:
-      - admin
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: admin-console
-    command: bun apps/admin-console/server/src/index.ts
-    restart: unless-stopped
-    env_file:
-      - .env.remote-docs
-    environment:
-      ADMIN_HTTP_HOST: 0.0.0.0
-      ADMIN_HTTP_PORT: 3100
-      ADMIN_COOKIE_SECURE: ${ADMIN_COOKIE_SECURE:-false}
-      ADMIN_AUTH_LOG_LEVEL: ${ADMIN_AUTH_LOG_LEVEL:-INFO}
-      DATABASE_URL: postgres://${POSTGRES_USER:-bun_dev_intel}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres-pgvector:5432/${POSTGRES_DB:-bun_dev_intel}
-    ports:
-      - "3100:3100"
-    depends_on:
-      postgres-pgvector:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "bun", "-e", "const r = await fetch('http://127.0.0.1:3100/healthz'); process.exit(r.ok ? 0 : 1);"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
 
 volumes:
   remote-docs-postgres:

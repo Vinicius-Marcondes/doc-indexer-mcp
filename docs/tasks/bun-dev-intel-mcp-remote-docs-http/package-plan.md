@@ -14,8 +14,7 @@ No product behavior is introduced by this task. There is no Hono app, HTTP serve
 
 | Package | Version | Purpose | First expected use |
 | --- | --- | --- | --- |
-| `@modelcontextprotocol/server` | `2.0.0-alpha.2` | Existing MCP server package; keeps local stdio behavior and provides the Web Standard Streamable HTTP transport candidate. | Existing stdio server; Task 04 HTTP transport. |
-| `@modelcontextprotocol/hono` | `2.0.0-alpha.2` | Official MCP Hono integration helper package and host/header validation candidate. | Task 04, if the direct Web Standard transport needs Hono helper wiring. |
+| `@modelcontextprotocol/server` | `2.0.0-alpha.2` | MCP server package and Web Standard Streamable HTTP transport provider. | Task 04 HTTP transport. |
 | `hono` | `^4.12.18` | Thin Bun HTTP framework required by the PRD. | Task 03 HTTP shell. |
 | `postgres` | `^3.4.9` | Bun-compatible Postgres client for DB access and future internal migration execution. | Tasks 06-07 migrations/storage. |
 | `openai` | `^6.37.0` | Official OpenAI client for the later embedding provider. | Task 12 OpenAI embedding provider. |
@@ -31,22 +30,20 @@ Selected imports must compile:
 
 ```ts
 import { McpServer, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server';
-import * as mcpHono from '@modelcontextprotocol/hono';
 import { Hono } from 'hono';
 import postgres from 'postgres';
 import OpenAI from 'openai';
 ```
 
-Known MCP stdio package mismatch:
+Historical MCP stdio package mismatch:
 
 - The installed `@modelcontextprotocol/server@2.0.0-alpha.2` package still does not resolve `@modelcontextprotocol/server/stdio` in this workspace.
-- This does not block Task 01 because the existing local `LocalStdioServerTransport` shim remains the stdio path, as documented in the PRD.
-- Do not remove the local stdio shim until a later task proves the published package export works in this repository.
+- The stdio shim is now owned by the split-out `bun-dev-intel-stdio-mcp` repository; this repository no longer exposes stdio.
 
 ## Package Boundaries
 
 - Remote HTTP transport packages stay isolated from docs retrieval, ingestion, embeddings, and storage modules.
-- The existing local stdio entrypoint and local project-analysis behavior remain intact.
+- Local stdio and local project-analysis behavior are owned by the split-out stdio project.
 - `postgres` is the DB access baseline; later migration tasks should implement a small repository-local SQL migration runner before adding another migration dependency.
 - `openai` is installed now so Task 12 can focus on provider behavior and mocked tests rather than package selection.
 - No `start` script is added yet because the HTTP entrypoint does not exist until later tasks.

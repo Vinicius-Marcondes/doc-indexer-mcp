@@ -12,18 +12,6 @@ const requiredEnvNames = [
   "DOCS_REFRESH_INTERVAL",
   "DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS"
 ] as const;
-const adminEnvNames = [
-  "ADMIN_HTTP_HOST",
-  "ADMIN_HTTP_PORT",
-  "ADMIN_SESSION_SECRET",
-  "ADMIN_COOKIE_SECURE",
-  "ADMIN_BOOTSTRAP_EMAIL",
-  "ADMIN_BOOTSTRAP_PASSWORD",
-  "ADMIN_SESSION_TTL_SECONDS",
-  "ADMIN_LOGIN_RATE_LIMIT_WINDOW_SECONDS",
-  "ADMIN_LOGIN_RATE_LIMIT_MAX_ATTEMPTS",
-  "ADMIN_AUTH_LOG_LEVEL"
-] as const;
 
 async function readText(path: string): Promise<string> {
   return Bun.file(new URL(path, root)).text();
@@ -49,56 +37,39 @@ describe("remote docs Docker deployment config", () => {
     expect(dockerfile).not.toContain("--production");
     expect(dockerfile).toContain("EXPOSE 3000");
     expect(dockerfile).toContain('CMD ["bun", "src/http.ts"]');
-  });
-
-  test("Dockerfile includes an admin console target that builds the React client", async () => {
-    const dockerfile = await readText("Dockerfile");
-
-    expect(dockerfile).toContain("AS admin-console");
-    expect(dockerfile).toContain("bun run admin:client:build");
-    expect(dockerfile).toContain("apps/admin-console/client/dist");
-    expect(dockerfile).toContain("EXPOSE 3100");
-    expect(dockerfile).toContain('CMD ["bun", "apps/admin-console/server/src/index.ts"]');
+    expect(dockerfile).not.toContain("admin-console");
   });
 
   test("compose example defines server, worker, and Postgres services", async () => {
-    const compose = await readText("docker-compose.remote-docs.yml");
+    const compose = await readText("docker-compose.yml");
 
     expect(serviceBlock(compose, "mcp-http-server")).toContain("3000:3000");
     expect(serviceBlock(compose, "docs-worker")).toContain("bun src/docs-worker.ts");
     expect(serviceBlock(compose, "postgres-pgvector")).toContain("pgvector/pgvector");
   });
 
-  test("compose admin console is optional and does not receive the MCP bearer token", async () => {
-    const compose = await readText("docker-compose.remote-docs.yml");
-    const admin = serviceBlock(compose, "admin-console");
+  test("compose does not include split-out admin console service", async () => {
+    const compose = await readText("docker-compose.yml");
 
-    expect(admin).toContain("profiles:");
-    expect(admin).toContain("- admin");
-    expect(admin).toContain("target: admin-console");
-    expect(admin).toContain("3100:3100");
-    expect(admin).toContain("ADMIN_HTTP_HOST: 0.0.0.0");
-    expect(admin).toContain("ADMIN_HTTP_PORT: 3100");
-    expect(admin).toContain("ADMIN_COOKIE_SECURE: ${ADMIN_COOKIE_SECURE:-false}");
-    expect(admin).toContain("ADMIN_AUTH_LOG_LEVEL: ${ADMIN_AUTH_LOG_LEVEL:-INFO}");
-    expect(admin).toContain("DATABASE_URL:");
-    expect(admin).not.toContain("MCP_BEARER_TOKEN");
+    expect(compose).not.toContain("admin-console");
+    expect(compose).not.toContain("3100:3100");
+    expect(compose).not.toContain("MCP_BEARER_TOKEN");
   });
 
   test("compose and env example do not contain real-looking secrets", async () => {
-    const compose = await readText("docker-compose.remote-docs.yml");
-    const env = await readText(".env.remote-docs.example");
+    const compose = await readText("docker-compose.yml");
+    const env = await readText(".env.example");
     const combined = `${compose}\n${env}`;
 
     expect(combined).not.toMatch(/sk-[A-Za-z0-9_-]{20,}/u);
     expect(combined).not.toMatch(/MCP_BEARER_TOKEN=(?!\$\{|replace-|change-|example-|your-)[^\s#]{16,}/u);
     expect(combined).not.toMatch(/OPENAI_API_KEY=(?!\$\{|replace-|change-|example-|your-)[^\s#]{16,}/u);
-    expect(combined).not.toMatch(/ADMIN_SESSION_SECRET=(?!\$\{|replace-|change-|example-|your-)[^\s#]{16,}/u);
-    expect(combined).not.toMatch(/ADMIN_BOOTSTRAP_PASSWORD=(?!\$\{|replace-|change-|example-|your-)[^\s#]{12,}/u);
+    expect(combined).not.toContain("ADMIN_SESSION_SECRET");
+    expect(combined).not.toContain("ADMIN_BOOTSTRAP_PASSWORD");
   });
 
   test("server and worker commands use separate entrypoints", async () => {
-    const compose = await readText("docker-compose.remote-docs.yml");
+    const compose = await readText("docker-compose.yml");
 
     expect(serviceBlock(compose, "mcp-http-server")).toContain("bun src/http.ts");
     expect(serviceBlock(compose, "docs-worker")).toContain("bun src/docs-worker.ts");
@@ -106,7 +77,7 @@ describe("remote docs Docker deployment config", () => {
   });
 
   test("docs worker service stays alive between worker cycles", async () => {
-    const compose = await readText("docker-compose.remote-docs.yml");
+    const compose = await readText("docker-compose.yml");
     const worker = serviceBlock(compose, "docs-worker");
 
     expect(worker).toContain("sh -c");
@@ -116,7 +87,7 @@ describe("remote docs Docker deployment config", () => {
   });
 
   test("required env variable names are documented", async () => {
-    const env = await readText(".env.remote-docs.example");
+    const env = await readText(".env.example");
     const docs = await readText("docs/deployment/remote-docs-http.md");
 
     for (const name of requiredEnvNames) {
@@ -124,21 +95,16 @@ describe("remote docs Docker deployment config", () => {
       expect(docs).toContain(name);
     }
 
-    for (const name of adminEnvNames) {
-      expect(env).toContain(`${name}=`);
-      expect(docs).toContain(name);
-    }
-
     expect(docs).toContain("TLS");
     expect(docs).toContain("bun src/http.ts");
     expect(docs).toContain("bun src/docs-worker.ts");
-    expect(docs).toContain("bun apps/admin-console/server/src/index.ts");
-    expect(docs).toContain("--profile admin");
+    expect(docs).not.toContain("bun apps/admin-console/server/src/index.ts");
+    expect(docs).not.toContain("--profile admin");
     expect(docs).toContain("runRemoteDocsMigrations");
   });
 
   test("env example and deployment docs cover stale running job recovery", async () => {
-    const env = await readText(".env.remote-docs.example");
+    const env = await readText(".env.example");
     const docs = await readText("docs/deployment/remote-docs-http.md");
 
     expect(env).toContain("DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS=1800");

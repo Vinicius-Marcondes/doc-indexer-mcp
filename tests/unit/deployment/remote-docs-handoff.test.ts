@@ -14,10 +14,11 @@ describe("remote docs HTTP handoff documentation", () => {
     for (const expected of [
       "/mcp",
       "MCP_BEARER_TOKEN",
-      "docker-compose.remote-docs.yml",
+      "docker-compose.yml",
       "bun src/http.ts",
       "bun src/docs-worker.ts",
-      "local stdio",
+      "bun-dev-intel-stdio-mcp",
+      "bun-dev-intel-admin-console",
       "remote HTTP",
       "docs-only",
       "scheduled refresh",
@@ -53,13 +54,13 @@ describe("remote docs HTTP handoff documentation", () => {
       "Streamable HTTP MCP endpoint",
       "Bearer token authentication",
       "Docs-only remote capabilities",
-      "Local stdio remains intact",
       "Official Bun source policy",
       "Postgres and pgvector storage",
       "Hybrid keyword and semantic retrieval",
       "Documentation page and chunk retrieval",
       "Scheduled and on-demand refresh",
-      "Docker deployment"
+      "Docker deployment",
+      "Split-out sibling projects"
     ]) {
       expect(traceability).toContain(requirement);
     }
@@ -81,13 +82,13 @@ describe("remote docs HTTP handoff documentation", () => {
       "Safe worker failure logs",
       "Running timeout configuration",
       "Remote HTTP remains docs-only",
-      "Local stdio remains intact"
+      "Split-out sibling projects"
     ]) {
       expect(traceability).toContain(requirement);
     }
 
     expect(traceability).toContain("tests/integration/mcp/streamable-http-entrypoint.test.ts");
-    expect(traceability).toContain("tests/integration/mcp/stdio-entrypoint.test.ts");
+    expect(traceability).toContain("tests/unit/http-import-boundary.test.ts");
     expect(traceability).not.toContain("| todo |");
     expect(traceability).not.toContain("| blocked |");
   });

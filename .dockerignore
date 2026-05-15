@@ -1,7 +1,7 @@
 .git
 .env
 .env.*
-!.env.remote-docs.example
+!.env.example
 node_modules
 coverage
 dist

@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: 2026-05-14
 - Planned validation: `bun test tests/e2e/remote-docs-http-flow.test.ts tests/unit/deployment/remote-docs-handoff.test.ts` pass; `bun test` pass; `bun run typecheck` pass; `bun run check` pass
 - Commit intent: Commit final QA, documentation, traceability, and tracker conclusion for the remote docs HTTP project.
-- Notes: All tasks 00-24 are done. Final gates pass with 419 pass and 17 skipped; skipped cases are opt-in live or `TEST_DATABASE_URL`-gated infrastructure tests.
+- Notes: All tasks 00-24 are done. A later split moved local stdio and admin into sibling repositories (`bun-dev-intel-stdio-mcp` and `bun-dev-intel-admin-console`); this repository now owns only remote docs HTTP MCP and worker behavior.
 
 ## Task Status
 

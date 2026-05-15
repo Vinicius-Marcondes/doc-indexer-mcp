@@ -3,11 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import {
-  createBunDevIntelServer,
+  createRemoteDocsMcpServer,
   createServerDependencies,
   getRemoteDocsCapabilityManifest,
-  getServerCapabilityManifest,
-  registerBunDevIntelCapabilities,
   registerRemoteDocsCapabilities,
   serverMetadata
 } from "../../../src/server";
@@ -54,13 +52,13 @@ afterEach(() => {
   }
 });
 
-describe("MCP server registration", () => {
+describe("remote docs MCP server registration", () => {
   test("server can be constructed", () => {
-    const server = createBunDevIntelServer({
+    const server = createRemoteDocsMcpServer({
       dependencies: createServerDependencies({
         cachePath: tempCachePath(),
         fetchImpl: async () => new Response("", { status: 200 }),
-        now: () => "2026-05-12T10:00:00.000Z"
+        now: () => "2026-05-15T10:00:00.000Z"
       })
     });
 
@@ -71,95 +69,7 @@ describe("MCP server registration", () => {
     });
   });
 
-  test("required tools are registered", () => {
-    const registrar = new RecordingRegistrar();
-    registerBunDevIntelCapabilities(
-      registrar,
-      createServerDependencies({
-        cachePath: tempCachePath(),
-        fetchImpl: async () => new Response("", { status: 200 }),
-        now: () => "2026-05-12T10:00:00.000Z"
-      })
-    );
-
-    expect(registrar.tools.map((tool) => tool.name)).toEqual([
-      "project_health",
-      "check_before_install",
-      "check_bun_api_usage",
-      "lint_bun_file",
-      "analyze_bun_project",
-      "search_bun_docs",
-      "get_bun_best_practices",
-      "plan_bun_dependency",
-      "review_bun_project"
-    ]);
-  });
-
-  test("required resources are registered", () => {
-    const registrar = new RecordingRegistrar();
-    registerBunDevIntelCapabilities(
-      registrar,
-      createServerDependencies({
-        cachePath: tempCachePath(),
-        fetchImpl: async () => new Response("", { status: 200 }),
-        now: () => "2026-05-12T10:00:00.000Z"
-      })
-    );
-
-    expect(registrar.resources.map((resource) => resource.name)).toEqual([
-      "bun-docs-index",
-      "bun-docs-page",
-      "bun-project-analysis",
-      "bun-project-findings"
-    ]);
-  });
-
-  test("tool schemas match expected input contracts", () => {
-    const manifest = getServerCapabilityManifest();
-
-    expect(manifest.tools.map((tool) => [tool.name, standardSchemaInputKeys(tool.inputSchema)])).toEqual([
-      ["project_health", ["projectPath", "focus", "responseMode", "sinceToken", "forceRefresh"]],
-      ["check_before_install", ["projectPath", "packages", "dependencyType", "responseMode", "forceRefresh"]],
-      ["check_bun_api_usage", ["apiName", "projectPath", "usageSnippet", "agentTrainingCutoff", "responseMode", "forceRefresh"]],
-      ["lint_bun_file", ["projectPath", "filePath", "responseMode"]],
-      ["analyze_bun_project", ["projectPath", "forceRefresh"]],
-      ["search_bun_docs", ["query", "topic", "limit", "forceRefresh"]],
-      ["get_bun_best_practices", ["topic", "projectPath", "forceRefresh"]],
-      ["plan_bun_dependency", ["projectPath", "packages", "dependencyType", "responseMode"]],
-      ["review_bun_project", ["projectPath", "focus", "responseMode"]]
-    ]);
-  });
-
-  test("registered tool schemas are Standard Schema-compatible for the MCP SDK", () => {
-    const registrar = new RecordingRegistrar();
-    registerBunDevIntelCapabilities(
-      registrar,
-      createServerDependencies({
-        cachePath: tempCachePath(),
-        fetchImpl: async () => new Response("", { status: 200 }),
-        now: () => "2026-05-12T10:00:00.000Z"
-      })
-    );
-
-    for (const tool of registrar.tools) {
-      const schema = tool.config.inputSchema as StandardSchemaInput;
-      expect(schema["~standard"]?.jsonSchema?.input).toBeTypeOf("function");
-    }
-  });
-
-  test("tool descriptions are present and concise", () => {
-    const manifest = getServerCapabilityManifest();
-
-    for (const tool of manifest.tools) {
-      expect(tool.description.length).toBeGreaterThan(20);
-      expect(tool.description.length).toBeLessThanOrEqual(160);
-    }
-
-    expect(manifest.tools.find((tool) => tool.name === "project_health")?.description).toContain("brief");
-    expect(manifest.tools.find((tool) => tool.name === "check_before_install")?.description).toContain("before");
-  });
-
-  test("remote docs manifest can be built without DB or network startup", () => {
+  test("remote docs manifest exposes only HTTP-safe docs tools and resources", () => {
     const manifest = getRemoteDocsCapabilityManifest();
 
     expect(manifest.tools.map((tool) => tool.name)).toEqual(["search_docs", "get_doc_page", "search_bun_docs"]);
@@ -170,20 +80,15 @@ describe("MCP server registration", () => {
       "bun-docs-index",
       "bun-docs-page"
     ]);
-  });
-
-  test("remote docs manifest excludes project path inputs and local project resources", () => {
-    const manifest = getRemoteDocsCapabilityManifest();
 
     for (const tool of manifest.tools) {
       expect(standardSchemaInputKeys(tool.inputSchema)).not.toContain("projectPath");
+      expect(tool.description.length).toBeGreaterThan(20);
+      expect(tool.description.length).toBeLessThanOrEqual(160);
     }
-
-    expect(manifest.resources.map((resource) => resource.name)).not.toContain("bun-project-analysis");
-    expect(manifest.resources.map((resource) => resource.name)).not.toContain("bun-project-findings");
   });
 
-  test("remote docs registration is docs-only and does not fetch at registration time", () => {
+  test("remote docs registration is side-effect-light and does not fetch at registration time", () => {
     const registrar = new RecordingRegistrar();
     let fetchCount = 0;
 
@@ -195,7 +100,7 @@ describe("MCP server registration", () => {
           fetchCount += 1;
           return new Response("", { status: 200 });
         },
-        now: () => "2026-05-12T10:00:00.000Z"
+        now: () => "2026-05-15T10:00:00.000Z"
       })
     );
 
@@ -208,5 +113,10 @@ describe("MCP server registration", () => {
       "bun-docs-index",
       "bun-docs-page"
     ]);
+
+    for (const tool of registrar.tools) {
+      const schema = tool.config.inputSchema as StandardSchemaInput;
+      expect(schema["~standard"]?.jsonSchema?.input).toBeTypeOf("function");
+    }
   });
 });

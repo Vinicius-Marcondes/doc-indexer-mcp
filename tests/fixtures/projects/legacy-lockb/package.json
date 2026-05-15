@@ -1,7 +1,0 @@
-{
-  "name": "legacy-lockb",
-  "type": "module",
-  "scripts": {
-    "test": "bun test"
-  }
-}

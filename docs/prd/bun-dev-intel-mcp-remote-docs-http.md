@@ -16,7 +16,7 @@ Remote agents also need a shared MCP endpoint they can access over HTTP. Running
 
 The goal is to separate concerns:
 
-- Keep local project analysis local, through the existing stdio/local server path.
+- Keep local project analysis local, through the split-out `bun-dev-intel-stdio-mcp` stdio repository.
 - Add a remote docs intelligence service for shared documentation search and retrieval.
 - Store normalized docs, chunks, metadata, and embeddings in Postgres so retrieval is fast, auditable, and reusable.
 - Use official source allowlists and freshness metadata so agents can cite current evidence instead of relying on model memory.
@@ -31,7 +31,7 @@ The goal is to separate concerns:
 ## 4. Goals
 
 - Add a modern Streamable HTTP MCP entrypoint for remote docs tools.
-- Keep the existing stdio entrypoint and local project-analysis behavior intact.
+- Keep local project-analysis behavior out of the remote HTTP service.
 - Require bearer-token authentication for every HTTP MCP request.
 - Provide docs-only tools over HTTP for search and page retrieval.
 - Support Bun docs first while preserving a source-pack architecture for future domains.
@@ -46,7 +46,6 @@ The goal is to separate concerns:
 
 ## 5. Non-Goals For V1
 
-- Do not remove or replace the existing stdio server.
 - Do not expose local project filesystem analysis over the remote HTTP server.
 - Do not accept arbitrary `projectPath` values in the remote docs-only server.
 - Do not perform broad open-web search.
@@ -66,8 +65,8 @@ The goal is to separate concerns:
 
 - Language: TypeScript.
 - Runtime and package manager: Bun.
-- Existing local transport: keep stdio.
-- New remote transport: MCP Streamable HTTP only.
+- Local project-analysis transport: owned by the split-out stdio project.
+- Remote transport in this repository: MCP Streamable HTTP only.
 - HTTP framework: Hono on Bun.
 - HTTP endpoint path: `/mcp`.
 - Authentication: single shared bearer token.
@@ -161,7 +160,7 @@ The server and worker must reject non-allowlisted URLs. Future source packs may 
 
 ## 7. MCP Tools
 
-The remote HTTP server exposes docs-only tools. Local project-analysis tools remain available through the local stdio server, not through the remote docs server.
+The remote HTTP server exposes docs-only tools. Local project-analysis tools remain available through the split-out stdio project, not through the remote docs server.
 
 All docs tool responses must include:
 

@@ -31,7 +31,7 @@ The duplicate happens because ingestion checks whether an embedding exists, gene
 - Recover stale `running` jobs created by worker crashes, container restarts, or unexpected exceptions.
 - Reduce source-level overlap between broad `source_index` refresh and page-specific refresh jobs.
 - Improve worker logs enough to identify the failed job, error code, and safe message without exposing secrets.
-- Preserve the docs-only remote HTTP server and existing stdio/local project analysis behavior.
+- Preserve the docs-only remote HTTP server boundary; stdio/local project analysis is owned by the split-out `bun-dev-intel-stdio-mcp` repository.
 - Keep ingestion outside the HTTP request path.
 
 ## 4. Non-Goals
@@ -268,7 +268,7 @@ Update `tests/unit/deployment/docker-config.test.ts` and docs tests if they vali
 
 Cases:
 
-- `.env.remote-docs.example` documents `DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS`.
+- `.env.example` documents `DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS`.
 - deployment docs explain running job recovery and the timeout.
 
 ## 9. Acceptance Criteria
@@ -279,7 +279,7 @@ Cases:
 - Worker logs include safe job-level error details.
 - `DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS` is documented and validated.
 - A broad `source_index` job does not run concurrently with page jobs for the same source in the same cycle.
-- Existing local stdio tools and remote docs-only HTTP partition remain unchanged.
+- Existing remote docs-only HTTP partition remains unchanged. Local stdio tools are maintained in the split-out `bun-dev-intel-stdio-mcp` repository.
 - Required validation passes:
 
 ```bash

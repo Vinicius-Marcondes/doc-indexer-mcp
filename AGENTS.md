@@ -1,52 +1,66 @@
 # AGENTS.md
 
-This file provides guidance to AI Agents when working with code in this repository.
-  
-## Project
+## 1. Overview
 
-`bun-dev-intel-mcp` — a source-backed MCP (Model Context Protocol) stdio server that analyzes local Bun/TypeScript projects, searches official Bun docs, plans Bun dependency commands, and exposes read-only MCP resources. Runtime is Bun; tests use `bun:test`; schemas use Zod v4.
+`bun-dev-intel-remote-docs-mcp` is a docs-only remote MCP service for source-backed documentation search, retrieval, ingestion, refresh, and storage. Keep local project analysis, stdio transport, and admin-console runtime code out of this repository.
 
-The implementation is driven by `docs/prd/bun-dev-intel-mcp.md` (PRD) and the task cluster files under `docs/tasks/bun-dev-intel-mcp/` (start at `tracker.md`, then open only the active cluster file). When scope changes, the PRD is the source of truth — update it before implementation.
+## 2. Folder Structure
 
-## Commands
+- `src/http.ts`: HTTP server startup; parses remote-docs config, wires the Hono app, and starts `Bun.serve`.
+- `src/http/`: HTTP boundary code for `/healthz`, `/readyz`, `/mcp`, bearer auth, origin checks, body limits, and Streamable HTTP transport wiring.
+- `src/server.ts`: MCP capability registry; registers the docs-only tools/resources, creates dependencies, wraps tool/resource output as JSON MCP content, and audits tool calls.
+- `src/tools/`: MCP tool handlers. Each handler validates unknown input, checks source policy, calls retrieval/page stores, and queues refresh work when needed.
+- `src/resources/`: MCP resource handlers and output mappers for indexed sources, pages, chunks, and Bun docs compatibility resources.
+- `src/docs/`: remote documentation pipeline.
+  - `sources/`: source-pack contracts, Bun source policy, discovery, redirect revalidation, and content normalization.
+  - `ingestion/`: page chunking and ingestion orchestration from discovery through page/chunk/embedding storage.
+  - `embeddings/`: embedding provider contract, fake provider, OpenAI-compatible provider, and dimension validation.
+  - `retrieval/`: keyword, vector, and hybrid retrieval, scoring, freshness, confidence, warnings, and telemetry.
+  - `refresh/`: refresh queue, scheduled/on-demand worker, stale job recovery, source-level exclusivity, and tombstone policy.
+  - `storage/`: Postgres client, migration runner, row mappers, and storage methods for sources, pages, chunks, embeddings, jobs, and telemetry.
+- `src/sources/`: compatibility source fetch/cache adapters and the broader official-source allowlist used by legacy Bun docs resources.
+- `src/cache/`: SQLite compatibility cache and fallback policy for legacy resource paths.
+- `src/config/`: remote docs environment parsing and validation.
+- `src/shared/`: Zod-backed response contracts and structured error helpers shared across tools/resources.
+- `src/logging/`: audit logging with payload summarization, project-path safety, and error sanitization.
+- `migrations/remote-docs/`: Postgres/pgvector schema for docs sources, pages, chunks, embeddings, refresh jobs, and retrieval telemetry.
+- `tests/`: unit, integration, e2e, and opt-in live tests; mirror source areas when adding coverage.
+- `docs/`: PRDs, task trackers, traceability notes, and deployment documentation that must stay aligned with implementation changes.
+- `Dockerfile`, `docker-compose.yml`, `.env.example`: deployment scaffolding for the HTTP server, worker, and Postgres/pgvector stack.
 
-```bash
-bun test                          # full test suite (offline, deterministic)
-bun test path/to/file.test.ts     # single file
-bun test -t "name pattern"        # filter by test name
-LIVE_DOCS=1 bun test tests/live   # opt-in live checks (Bun docs + npm registry only)
-bun run typecheck                 # tsc --noEmit
-bun run check                     # bun test && typecheck (pre-merge gate)
-bun --watch src/server.ts         # dev (alias: bun run dev)
-```
+## 3. Core Behaviors & Patterns
 
-Tests under `tests/fixtures/projects/**` are excluded from the TS compile (`tsconfig.json` `exclude`).
+- **HTTP boundary and capability partitioning**: `createRemoteHttpApp` owns request-level safety before `/mcp` reaches the MCP transport: query-string tokens are rejected, optional origins are checked, bearer auth is required, and body size is bounded. `src/server.ts` registers only remote docs tools/resources, so new capabilities must not reintroduce stdio transport, local project analyzers, or admin-console code.
+- **Dependency injection for testable flows**: Factories accept dependencies such as `now`, `fetchImpl`, `sql`, stores, registries, queues, and providers. Preserve this shape when extending code so tests can exercise HTTP, retrieval, ingestion, refresh, and logging without live network or global time.
+- **Structured validation and errors**: Tool/resource inputs start as `unknown`, pass through Zod `safeParse`, and return `{ ok: false, error: StructuredError }` for user-facing failures. Shared helpers in `src/shared/errors.ts` create stable error codes; reserve thrown errors for startup failures, impossible storage invariants, or unexpected worker exceptions that are converted before persistence/logging.
+- **Source policy at every boundary**: Source packs and registries are the authority for allowed docs. Discovery, ingestion, tools, resources, and refresh queue paths all call `checkUrl`/registry checks before fetching, storing, or queueing work. Bun V1 accepts only HTTPS `bun.com/docs` index/page URLs and revalidates redirects against the same policy.
+- **Ingestion lifecycle**: The pipeline discovers index pages, fetches allowed pages, normalizes content, upserts source/page rows, chunks by Markdown structure, reuses unchanged chunks and existing embeddings, and inserts missing embeddings idempotently. Keep content hashes, canonical URLs, chunk indexes, and embedding metadata consistent across this flow.
+- **Retrieval and refresh coupling**: Hybrid retrieval merges keyword and vector candidates, boosts exact technical terms, computes freshness/confidence, records telemetry best-effort, and surfaces warnings. `search_docs` and `get_doc_page` translate missing/stale/low-confidence/manual signals into bounded refresh jobs without blocking the response.
+- **Refresh worker resilience**: The queue deduplicates pending work by source/URL/job type, applies global and per-source bounds, and delays jobs after recent failures. The worker recovers stale `running` jobs, avoids running page-level jobs alongside a source-wide job for the same source, marks each job succeeded/failed independently, and tombstones pages only after repeated confirmed 404/410 failures.
+- **Logging and audit safety**: Audit logging is opt-in and writes only to absolute paths outside the requested project path. DEBUG logs summarize payloads, TRACE can include full payloads, and worker failure logs redact bearer tokens, API-key-like strings, and raw content/body wording before writing messages.
 
-## Architecture
+## 4. Conventions
 
-The server (`src/server.ts`) wires a single `McpServer` instance via dependency injection: a `ServerDependencies` bundle (cache, fetch client, source adapters, analysis store, `now()`) is constructed once and passed to tool/resource handlers. `defaultCachePath()` writes SQLite to `~/.cache/bun-dev-intel-mcp/cache.sqlite`. The stdio entrypoint (`src/stdio.ts`) ships a **local `LocalStdioServerTransport`** because the published `@modelcontextprotocol/server@2.0.0-alpha.2` package does not expose the documented `./stdio` subpath — keep this shim until the upstream alpha exposes the subpath. Transport scope is stdio only.
+- **TypeScript shape**: Use strict TypeScript with `readonly` interfaces for public data shapes, discriminated unions for results, `type` imports where appropriate, and camelCase application fields. Database row interfaces stay snake_case and are converted through `map*` helpers.
+- **Schema naming**: Zod imports use `zod/v4`; schemas are named with a `Schema` suffix and paired with inferred or explicit TypeScript types. Public tool inputs expose `*InputSchema` constants beside the handler that consumes them.
+- **Result naming**: Reusable flows define `Success`, `Failure`, and union result types with `ok: true` / `ok: false`. Keep response fields source-backed: citations, freshness, confidence, warnings, hashes, and refresh metadata should remain present where the contract supports them.
+- **Factory and dependency names**: Constructors take `*Options`; pure handlers take `*Dependencies`; startup functions use `start*`/`run*`; config parsers use `parse*`; resource readers use `read*`. Continue injecting `now` instead of calling `new Date()` deep inside logic unless the surrounding module already owns wall-clock behavior.
+- **Storage boundaries**: Keep SQL inside `src/docs/storage/` using the tagged `postgres` client and explicit row mappers. Validate vector dimensions before inserting embeddings, keep pgvector assumptions synchronized with config validation, and make idempotent inserts return compatible existing rows.
+- **Config boundaries**: Add environment variables through `parseRemoteDocsConfig`, tests, `.env.example`, and deployment docs together. Startup functions should report config issues as structured startup failures rather than leaking partial service state.
+- **Comments**: Prefer clear names and small helpers over comments. Use short comments only to explain non-obvious fallback, redaction, migration, or security behavior.
+- **Documentation traceability**: When behavior changes a PRD-backed feature, update the relevant `docs/prd/`, `docs/tasks/`, traceability, README, and deployment docs so public guidance matches the code.
 
-Layered modules (all read-only with respect to analyzed projects):
+## 5. Working Agreements
 
-- `src/tools/` — five MCP tools: `analyze_bun_project`, `search_bun_docs`, `get_bun_best_practices`, `plan_bun_dependency`, `review_bun_project`. Each tool composes analyzers + sources + recommendations and returns a response shaped by `src/shared/contracts.ts`.
-- `src/resources/` — three MCP resources: `bun-docs://index`, `bun-docs://page/{slug}`, `bun-project://analysis/{projectHash}`. `project-analysis-store.ts` keys analyses by hash for resource lookup.
-- `src/analyzers/` — read-only project inspection: `package-json`, `lockfiles`, `tsconfig`, `bunfig`, `source-discovery`, `ast-imports`, `ast-bun-globals`, `test-analysis`. AST work uses the TypeScript compiler API — **regex-only source analysis is not acceptable** for imports or `Bun.*` detection.
-- `src/sources/` — external adapters behind `SourceFetchClient`: `bun-docs-index`, `bun-docs-search`, `bun-docs-page`, `npm-registry`. `allowlist.ts` enforces the official source policy; non-allowlisted URLs must be rejected.
-- `src/cache/` — `sqlite-cache.ts` is the cache store; `fallback-policy.ts` decides fresh/stale/miss behavior. Network failures fall back to stale cache and surface `cacheStatus` in responses.
-- `src/recommendations/` — `rules.ts` (best-practice rule set), `confidence.ts` (high/medium/low scoring), `dependency-plan.ts` (Bun add/install/remove planning). Every recommendation must cite sources via `SourceCitation` from `shared/contracts.ts`.
-- `src/security/` — `project-paths.ts` (path-boundary checks) and `ignore-policy.ts` (skip lists). The analyzer must never read `node_modules`, `.git`, build/cache/coverage outputs, or secret files (`.env*`, credentials).
-- `src/shared/` — `contracts.ts` (Zod schemas: `cacheStatus`, `confidence`, `sourceType`, `recommendation`, `cacheMetadata`, base response shape), `errors.ts` (structured errors), `project-hash.ts`.
-
-## Conventions
-
-- **Source-backed**: every recommendation/response includes `sources: SourceCitation[]` and a `cacheStatus`. Don't return advice without a citation path.
-- **Official source allowlist** (PRD §6): Bun docs (`bun.com/docs/llms.txt`, `llms-full.txt`, pages), `registry.npmjs.org`, `modelcontextprotocol.io`, `github.com/modelcontextprotocol/typescript-sdk`, `typescriptlang.org`. Adding a new external source requires updating `src/sources/allowlist.ts` and the PRD.
-- **TDD workflow** (PRD §13): tests first; live network is opt-in via `LIVE_DOCS=1`. Default test runs must be deterministic and offline — adapters take a `FetchLike` so they can be stubbed.
-- **TypeScript**: `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `verbatimModuleSyntax`, `allowImportingTsExtensions`. Import `.ts` extensions explicitly. Zod imports use `zod/v4`.
-- **Tracker discipline**: keep one task `in_progress` in `docs/tasks/bun-dev-intel-mcp/tracker.md`; append a brief Work Log entry on completion.
-
-## Repository rules (`AGENTS.md`)
-
+- Respond in the user's preferred language; if unspecified, infer from the repo, keep technical terms in English, and never translate code blocks.
 - Never read inside `node_modules`.
+- Before any git command, read the git rules under `docs/`; if no dedicated `docs/git*` file exists, report that gap before push or release work.
 - Never run `git push origin master`.
-- Before any `git` command, read the git rules under `docs/` (note: as of this writing, no `docs/git*` file exists yet — confirm or surface the gap before pushing).
+- Ask the user before introducing tests, lint, or formatter setups; add them only on explicit request.
+- Build context by reviewing related usages, flows, patterns, and likely impact before editing.
+- Fix the underlying cause, not only the visible symptom; inspect affected flows and apply the narrowest complete change that resolves the root issue.
+- Check side effects across callers, shared abstractions, and behavior/API boundaries; report relevant impact and compatibility risks.
+- Ask actively when user decisions are needed for scope, behavior, or tradeoffs.
+- Run type-check after code changes with `bun run typecheck`; for documentation-only changes, explain if type-check was not needed.
+- New functions should be single-purpose and colocated with related code.
+- Add external dependencies only when necessary and explain why.

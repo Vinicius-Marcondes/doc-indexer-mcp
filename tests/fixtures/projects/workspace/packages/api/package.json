@@ -1,7 +1,0 @@
-{
-  "name": "@fixture/api",
-  "type": "module",
-  "dependencies": {
-    "@fixture/shared": "workspace:*"
-  }
-}

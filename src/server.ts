@@ -1,29 +1,17 @@
-import { resolve } from "node:path";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { performance } from "node:perf_hooks";
+import { resolve } from "node:path";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { SqliteCacheStore } from "./cache/sqlite-cache";
-import { FindingCacheStore } from "./cache/finding-cache";
 import { createAuditLogger, type AuditLogEnv, type AuditLogger } from "./logging/audit-logger";
-import { analyzeBunProject } from "./tools/analyze-bun-project";
-import { searchDocs, searchDocsInputSchema, type SearchDocsRetrieval } from "./tools/search-docs";
 import { getDocPage, getDocPageInputSchema } from "./tools/get-doc-page";
 import { searchBunDocs, searchBunDocsInputSchema } from "./tools/search-bun-docs";
-import { getBunBestPractices } from "./tools/get-bun-best-practices";
-import { planBunDependency } from "./tools/plan-bun-dependency";
-import { reviewBunProject } from "./tools/review-bun-project";
-import { projectHealth } from "./tools/project-health";
-import { checkBeforeInstall } from "./tools/check-before-install";
-import { checkBunApiUsage } from "./tools/check-bun-api-usage";
-import { lintBunFile } from "./tools/lint-bun-file";
-import { responseModeSchema } from "./shared/agent-output";
+import { searchDocs, searchDocsInputSchema, type SearchDocsRefreshQueue, type SearchDocsRetrieval } from "./tools/search-docs";
 import { SourceFetchClient, type FetchLike } from "./sources/fetch-client";
 import { BunDocsIndexAdapter } from "./sources/bun-docs-index";
-import { BunDocsSearchAdapter } from "./sources/bun-docs-search";
 import { BunDocsPageAdapter } from "./sources/bun-docs-page";
-import { NpmRegistryAdapter } from "./sources/npm-registry";
 import {
   BUN_DOCS_INDEX_RESOURCE_URI,
   bunDocsIndexResource,
@@ -34,17 +22,6 @@ import {
   bunDocsPageResourceTemplate,
   readBunDocsPageResource
 } from "./resources/bun-docs-page-resource";
-import {
-  BUN_PROJECT_ANALYSIS_RESOURCE_URI_TEMPLATE,
-  bunProjectAnalysisResourceTemplate,
-  readBunProjectAnalysisResource
-} from "./resources/bun-project-analysis-resource";
-import {
-  BUN_PROJECT_FINDINGS_RESOURCE_URI_TEMPLATE,
-  bunProjectFindingsResourceTemplate,
-  readBunProjectFindingsResource
-} from "./resources/bun-project-findings-resource";
-import { ProjectAnalysisStore } from "./resources/project-analysis-store";
 import {
   DOCS_CHUNK_RESOURCE_URI_TEMPLATE,
   DOCS_PAGE_RESOURCE_URI_TEMPLATE,
@@ -58,16 +35,15 @@ import {
   type DocsPageStore
 } from "./resources/docs-resources";
 import type { RemoteDocsConfig } from "./config/remote-docs-config";
-import { createPostgresClient } from "./docs/storage/database";
-import { RemoteDocsStorage } from "./docs/storage/docs-storage";
+import { createOpenAiEmbeddingProviderFromConfig } from "./docs/embeddings/openai-provider";
+import { RefreshJobQueue } from "./docs/refresh/refresh-queue";
+import { HybridDocsRetrieval } from "./docs/retrieval/hybrid-retrieval";
 import { PostgresKeywordRetrieval } from "./docs/retrieval/keyword-retrieval";
 import { PostgresVectorRetrieval } from "./docs/retrieval/vector-retrieval";
-import { HybridDocsRetrieval } from "./docs/retrieval/hybrid-retrieval";
-import { createOpenAiEmbeddingProviderFromConfig } from "./docs/embeddings/openai-provider";
 import { defaultDocsSourceRegistry } from "./docs/sources/bun-source-pack";
 import type { DocsSourceRegistry } from "./docs/sources/registry";
-import { RefreshJobQueue } from "./docs/refresh/refresh-queue";
-import type { SearchDocsRefreshQueue } from "./tools/search-docs";
+import { createPostgresClient } from "./docs/storage/database";
+import { RemoteDocsStorage } from "./docs/storage/docs-storage";
 
 export interface ServerMetadata {
   readonly name: string;
@@ -81,13 +57,9 @@ export const serverMetadata: ServerMetadata = {
 
 export interface ServerDependencies {
   readonly cache: SqliteCacheStore;
-  readonly findingCacheStore: FindingCacheStore;
   readonly fetchClient: SourceFetchClient;
   readonly bunDocsIndexAdapter: BunDocsIndexAdapter;
-  readonly bunDocsSearchAdapter: BunDocsSearchAdapter;
   readonly bunDocsPageAdapter: BunDocsPageAdapter;
-  readonly npmRegistryAdapter: NpmRegistryAdapter;
-  readonly projectAnalysisStore: ProjectAnalysisStore;
   readonly docsSourceRegistry: DocsSourceRegistry;
   readonly docsRetrieval?: SearchDocsRetrieval;
   readonly docsPageStore?: DocsPageStore;
@@ -161,186 +133,6 @@ interface ResourceRegistration extends ResourceManifestEntry {
   readonly register: (registrar: BunDevIntelRegistrar, dependencies: ServerDependencies) => void;
 }
 
-const topicSchema = z.enum([
-  "runtime",
-  "package-manager",
-  "test-runner",
-  "bundler",
-  "typescript",
-  "workspaces",
-  "deployment",
-  "security",
-  "unknown"
-]);
-
-const bestPracticeTopicSchema = z.enum([
-  "typescript",
-  "dependencies",
-  "lockfile",
-  "tests",
-  "workspaces",
-  "runtime",
-  "bundler",
-  "deployment",
-  "security"
-]);
-
-const focusSchema = z.enum(["typescript", "dependencies", "tests", "lockfile", "runtime", "all"]);
-
-const packageRequestSchema = z.object({
-  name: z.string().min(1),
-  requestedRange: z.string().min(1).optional()
-});
-
-const analyzeBunProjectInputSchema = z
-  .object({
-    projectPath: z.string().min(1),
-    forceRefresh: z.boolean().optional()
-  })
-  .strict();
-
-const getBunBestPracticesInputSchema = z
-  .object({
-    topic: bestPracticeTopicSchema,
-    projectPath: z.string().min(1).optional(),
-    forceRefresh: z.boolean().optional()
-  })
-  .strict();
-
-const planBunDependencyInputSchema = z
-  .object({
-    projectPath: z.string().min(1),
-    packages: z.array(packageRequestSchema).min(1),
-    dependencyType: z.enum(["dependencies", "devDependencies", "optionalDependencies"]).optional(),
-    responseMode: responseModeSchema.optional()
-  })
-  .strict();
-
-const reviewBunProjectInputSchema = z
-  .object({
-    projectPath: z.string().min(1),
-    focus: focusSchema.optional(),
-    responseMode: responseModeSchema.optional()
-  })
-  .strict();
-
-const projectHealthInputSchema = z
-  .object({
-    projectPath: z.string().min(1),
-    focus: focusSchema.optional(),
-    responseMode: responseModeSchema.optional(),
-    sinceToken: z.string().min(1).optional(),
-    forceRefresh: z.boolean().optional()
-  })
-  .strict();
-
-const checkBeforeInstallInputSchema = z
-  .object({
-    projectPath: z.string().min(1),
-    packages: z.array(packageRequestSchema).min(1),
-    dependencyType: z.enum(["dependencies", "devDependencies", "optionalDependencies"]).optional(),
-    responseMode: responseModeSchema.optional(),
-    forceRefresh: z.boolean().optional()
-  })
-  .strict();
-
-const checkBunApiUsageInputSchema = z
-  .object({
-    apiName: z.string().min(1),
-    projectPath: z.string().min(1).optional(),
-    usageSnippet: z.string().min(1).optional(),
-    agentTrainingCutoff: z.string().min(1).optional(),
-    responseMode: responseModeSchema.optional(),
-    forceRefresh: z.boolean().optional()
-  })
-  .strict();
-
-const lintBunFileInputSchema = z
-  .object({
-    projectPath: z.string().min(1),
-    filePath: z.string().min(1),
-    responseMode: responseModeSchema.optional()
-  })
-  .strict();
-
-const toolRegistrations: ToolRegistration[] = [
-  {
-    name: "project_health",
-    description: "brief V2 project health scan for planning; returns ranked findings, actions, citations, and delta tokens.",
-    inputSchema: projectHealthInputSchema,
-    handler: (input, dependencies) =>
-      projectHealth(input, {
-        analysisStore: dependencies.projectAnalysisStore,
-        findingCache: dependencies.findingCacheStore,
-        now: dependencies.now
-      })
-  },
-  {
-    name: "check_before_install",
-    description: "Check packages before editing dependencies; returns npm-backed findings and approval-gated install actions.",
-    inputSchema: checkBeforeInstallInputSchema,
-    handler: (input, dependencies) =>
-      checkBeforeInstall(input, {
-        registryAdapter: dependencies.npmRegistryAdapter,
-        now: dependencies.now
-      })
-  },
-  {
-    name: "check_bun_api_usage",
-    description: "Check a Bun API against official docs; returns compact guidance, citations, and at most one example.",
-    inputSchema: checkBunApiUsageInputSchema,
-    handler: (input, dependencies) => checkBunApiUsage(input, { docsAdapter: dependencies.bunDocsSearchAdapter })
-  },
-  {
-    name: "lint_bun_file",
-    description: "Lint one file for Bun-specific API, import, type, and safety findings without mutating the project.",
-    inputSchema: lintBunFileInputSchema,
-    handler: (input) => lintBunFile(input)
-  },
-  {
-    name: "analyze_bun_project",
-    description: "Full raw project analysis; agents should prefer project_health for compact planning.",
-    inputSchema: analyzeBunProjectInputSchema,
-    handler: (input, dependencies) =>
-      analyzeBunProject(input, {
-        analysisStore: dependencies.projectAnalysisStore,
-        now: dependencies.now
-      })
-  },
-  {
-    name: "search_bun_docs",
-    description: "Search official Bun documentation and return cited, cache-aware excerpts.",
-    inputSchema: searchBunDocsInputSchema,
-    handler: (input, dependencies) =>
-      searchBunDocs(input, {
-        retrieval: dependencies.docsRetrieval,
-        sourceRegistry: dependencies.docsSourceRegistry,
-        refreshQueue: dependencies.docsRefreshQueue,
-        now: dependencies.now,
-        defaultLimit: dependencies.docsSearchDefaults.defaultLimit,
-        maxLimit: dependencies.docsSearchDefaults.maxLimit
-      })
-  },
-  {
-    name: "get_bun_best_practices",
-    description: "Return Bun-specific best-practice recommendations for a topic, optionally project-tailored.",
-    inputSchema: getBunBestPracticesInputSchema,
-    handler: (input, dependencies) => getBunBestPractices(input, { docsAdapter: dependencies.bunDocsSearchAdapter })
-  },
-  {
-    name: "plan_bun_dependency",
-    description: "Compatibility dependency planner; agents should prefer check_before_install before package edits.",
-    inputSchema: planBunDependencyInputSchema,
-    handler: (input, dependencies) => planBunDependency(input, { registryAdapter: dependencies.npmRegistryAdapter })
-  },
-  {
-    name: "review_bun_project",
-    description: "Produce an agent-ready Bun project context packet with risks, next actions, and citations.",
-    inputSchema: reviewBunProjectInputSchema,
-    handler: (input) => reviewBunProject(input)
-  }
-];
-
 const searchDocsRegistration: ToolRegistration = {
   name: "search_docs",
   description: "Search indexed official docs with hybrid keyword and semantic retrieval; remote docs only.",
@@ -368,6 +160,23 @@ const getDocPageRegistration: ToolRegistration = {
       now: dependencies.now
     })
 };
+
+const searchBunDocsRegistration: ToolRegistration = {
+  name: "search_bun_docs",
+  description: "Compatibility wrapper for official Bun documentation search over remote docs retrieval.",
+  inputSchema: searchBunDocsInputSchema,
+  handler: (input, dependencies) =>
+    searchBunDocs(input, {
+      retrieval: dependencies.docsRetrieval,
+      sourceRegistry: dependencies.docsSourceRegistry,
+      refreshQueue: dependencies.docsRefreshQueue,
+      now: dependencies.now,
+      defaultLimit: dependencies.docsSearchDefaults.defaultLimit,
+      maxLimit: dependencies.docsSearchDefaults.maxLimit
+    })
+};
+
+const remoteDocsToolRegistrations = [searchDocsRegistration, getDocPageRegistration, searchBunDocsRegistration];
 
 function jsonText(value: unknown): string {
   return JSON.stringify(value, null, 2);
@@ -406,14 +215,6 @@ function docsPageSlugFromUri(uri: URL): string {
   return decodeURIComponent(uri.href.replace("bun-docs://page/", ""));
 }
 
-function projectHashFromUri(uri: URL): string {
-  return uri.href.replace("bun-project://analysis/", "");
-}
-
-function projectFindingsHashFromUri(uri: URL): string {
-  return uri.href.replace("bun-project://findings/", "");
-}
-
 function docsResourceParamsFromUri(uri: URL): { readonly sourceId: string; readonly id: string } {
   const [sourceId = "", id = ""] = uri.pathname
     .split("/")
@@ -423,7 +224,7 @@ function docsResourceParamsFromUri(uri: URL): { readonly sourceId: string; reado
   return { sourceId, id };
 }
 
-const resourceRegistrations: ResourceRegistration[] = [
+const remoteDocsResourceRegistrations: ResourceRegistration[] = [
   {
     name: docsSourcesResource.name,
     description: docsSourcesResource.description,
@@ -564,89 +365,8 @@ const resourceRegistrations: ResourceRegistration[] = [
         }
       );
     }
-  },
-  {
-    name: bunProjectAnalysisResourceTemplate.name,
-    description: bunProjectAnalysisResourceTemplate.description,
-    mimeType: bunProjectAnalysisResourceTemplate.mimeType,
-    uriTemplate: bunProjectAnalysisResourceTemplate.uriTemplate,
-    register: (registrar, dependencies) => {
-      registrar.registerResource(
-        bunProjectAnalysisResourceTemplate.name,
-        new ResourceTemplate(BUN_PROJECT_ANALYSIS_RESOURCE_URI_TEMPLATE, { list: undefined }),
-        {
-          title: "Bun project analysis",
-          description: bunProjectAnalysisResourceTemplate.description,
-          mimeType: bunProjectAnalysisResourceTemplate.mimeType
-        },
-        (uri: unknown) => {
-          const resourceUri = uri instanceof URL ? uri : new URL("bun-project://analysis/");
-          return toMcpResourceResult(
-            resourceUri.href,
-            readBunProjectAnalysisResource(
-              { projectHash: projectHashFromUri(resourceUri) },
-              {
-                store: dependencies.projectAnalysisStore,
-                now: dependencies.now
-              }
-            )
-          );
-        }
-      );
-    }
-  },
-  {
-    name: bunProjectFindingsResourceTemplate.name,
-    description: bunProjectFindingsResourceTemplate.description,
-    mimeType: bunProjectFindingsResourceTemplate.mimeType,
-    uriTemplate: bunProjectFindingsResourceTemplate.uriTemplate,
-    register: (registrar, dependencies) => {
-      registrar.registerResource(
-        bunProjectFindingsResourceTemplate.name,
-        new ResourceTemplate(BUN_PROJECT_FINDINGS_RESOURCE_URI_TEMPLATE, { list: undefined }),
-        {
-          title: "Bun project findings",
-          description: bunProjectFindingsResourceTemplate.description,
-          mimeType: bunProjectFindingsResourceTemplate.mimeType
-        },
-        (uri: unknown) => {
-          const resourceUri = uri instanceof URL ? uri : new URL("bun-project://findings/");
-          return toMcpResourceResult(
-            resourceUri.href,
-            readBunProjectFindingsResource(
-              { projectHash: projectFindingsHashFromUri(resourceUri) },
-              {
-                store: dependencies.findingCacheStore
-              }
-            )
-          );
-        }
-      );
-    }
   }
 ];
-
-const remoteDocsToolNames = new Set(["search_bun_docs"]);
-const remoteOnlyResourceNames = new Set([
-  docsSourcesResource.name,
-  docsPageResourceTemplate.name,
-  docsChunkResourceTemplate.name
-]);
-const remoteDocsResourceNames = new Set([
-  docsSourcesResource.name,
-  docsPageResourceTemplate.name,
-  docsChunkResourceTemplate.name,
-  bunDocsIndexResource.name,
-  bunDocsPageResourceTemplate.name
-]);
-
-const localResourceRegistrations = resourceRegistrations.filter((resource) => !remoteOnlyResourceNames.has(resource.name));
-const remoteDocsToolRegistrations = [
-  searchDocsRegistration,
-  getDocPageRegistration,
-  ...toolRegistrations.filter((tool) => remoteDocsToolNames.has(tool.name))
-];
-const remoteDocsResourceRegistrations = resourceRegistrations.filter((resource) => remoteDocsResourceNames.has(resource.name));
 
 export function createServerDependencies(options: ServerDependencyOptions = {}): ServerDependencies {
   const now = options.now ?? (() => new Date().toISOString());
@@ -657,23 +377,17 @@ export function createServerDependencies(options: ServerDependencyOptions = {}):
     now
   });
   const bunDocsIndexAdapter = new BunDocsIndexAdapter({ cache, fetchClient, now });
-  const bunDocsSearchAdapter = new BunDocsSearchAdapter({ cache, fetchClient, now });
-  const bunDocsPageAdapter = new BunDocsPageAdapter({
-    cache,
-    fetchClient,
-    indexAdapter: bunDocsIndexAdapter,
-    now
-  });
 
   return {
     cache,
-    findingCacheStore: new FindingCacheStore(cachePath),
     fetchClient,
     bunDocsIndexAdapter,
-    bunDocsSearchAdapter,
-    bunDocsPageAdapter,
-    npmRegistryAdapter: new NpmRegistryAdapter({ cache, fetchClient, now }),
-    projectAnalysisStore: new ProjectAnalysisStore({ now }),
+    bunDocsPageAdapter: new BunDocsPageAdapter({
+      cache,
+      fetchClient,
+      indexAdapter: bunDocsIndexAdapter,
+      now
+    }),
     docsSourceRegistry: options.docsSourceRegistry ?? defaultDocsSourceRegistry,
     ...(options.docsRetrieval === undefined ? {} : { docsRetrieval: options.docsRetrieval }),
     ...(options.docsPageStore === undefined ? {} : { docsPageStore: options.docsPageStore }),
@@ -747,10 +461,6 @@ function capabilityManifestFor(
   };
 }
 
-export function getServerCapabilityManifest(): ServerCapabilityManifest {
-  return capabilityManifestFor(toolRegistrations, localResourceRegistrations);
-}
-
 export function getRemoteDocsCapabilityManifest(): ServerCapabilityManifest {
   return capabilityManifestFor(remoteDocsToolRegistrations, remoteDocsResourceRegistrations);
 }
@@ -802,13 +512,6 @@ function registerCapabilities(
   }
 }
 
-export function registerBunDevIntelCapabilities(
-  registrar: BunDevIntelRegistrar,
-  dependencies: ServerDependencies
-): void {
-  registerCapabilities(registrar, dependencies, toolRegistrations, localResourceRegistrations);
-}
-
 export function registerRemoteDocsCapabilities(
   registrar: BunDevIntelRegistrar,
   dependencies: ServerDependencies
@@ -816,17 +519,11 @@ export function registerRemoteDocsCapabilities(
   registerCapabilities(registrar, dependencies, remoteDocsToolRegistrations, remoteDocsResourceRegistrations);
 }
 
-export interface CreateBunDevIntelServerOptions {
+export interface CreateRemoteDocsMcpServerOptions {
   readonly dependencies?: ServerDependencies;
 }
 
-export function createBunDevIntelServer(options: CreateBunDevIntelServerOptions = {}): McpServer {
-  const server = new McpServer(serverMetadata);
-  registerBunDevIntelCapabilities(server as unknown as BunDevIntelRegistrar, options.dependencies ?? createServerDependencies());
-  return server;
-}
-
-export function createRemoteDocsMcpServer(options: CreateBunDevIntelServerOptions = {}): McpServer {
+export function createRemoteDocsMcpServer(options: CreateRemoteDocsMcpServerOptions = {}): McpServer {
   const server = new McpServer(serverMetadata);
   registerRemoteDocsCapabilities(server as unknown as BunDevIntelRegistrar, options.dependencies ?? createServerDependencies());
   return server;

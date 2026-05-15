@@ -41,7 +41,7 @@ The health endpoints were verified from inside the running `mcp-http-server` con
 The Docker migration command completed successfully:
 
 ```bash
-docker compose -f docker-compose.remote-docs.yml --env-file .env.remote-docs run --rm mcp-http-server \
+docker compose --env-file .env run --rm mcp-http-server \
   bun -e 'import { createPostgresClient, runRemoteDocsMigrations } from "./src/docs/storage/database.ts"; const sql = createPostgresClient(Bun.env.DATABASE_URL); await runRemoteDocsMigrations(sql); await sql.end?.({ timeout: 1 });'
 ```
 

@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: n/a
 - Planned validation: complete
 - Commit intent: n/a
-- Notes: All tasks complete. Final validation passed: focused storage, worker, config, deployment docs, HTTP/stdio boundary tests; `bun test`; `bun run typecheck`; `bun run check`. Database-backed tests skipped where `TEST_DATABASE_URL` is not set.
+- Notes: All tasks complete. A later split moved local stdio and admin into sibling repositories (`bun-dev-intel-stdio-mcp` and `bun-dev-intel-admin-console`); this repository now owns only remote docs HTTP MCP and worker behavior.
 
 ## Task Status
 
