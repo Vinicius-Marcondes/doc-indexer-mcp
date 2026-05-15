@@ -40,13 +40,13 @@ Commit message requirement:
 
 ## Current Task
 
-- Task ID: 02
-- Title: Add admin auth storage, bootstrap, and sessions
+- Task ID: 03
+- Title: Add admin read models and KPI queries
 - Owner: Codex
 - Status: done
 - Started: 2026-05-14
-- Planned validation: `bun test tests/unit/admin/admin-auth.test.ts tests/integration/admin/admin-auth-storage.test.ts tests/integration/storage/migrations.test.ts` pass; `bun run typecheck` pass; `bun run check` pass
-- Commit intent: Commit admin auth schema, storage/session primitives, middleware, bootstrap helper, and tests.
+- Planned validation: `bun test tests/unit/admin/admin-read-models.test.ts tests/integration/admin/admin-read-models-storage.test.ts` pass; `bun run typecheck` pass; `bun run check` pass
+- Commit intent: Commit admin read model types, KPI helpers, Postgres-backed read storage, and tests.
 - Notes: Focused tests pass; `bun run check` pass. Postgres integration cases are gated by `TEST_DATABASE_URL` and skipped locally.
 
 ## Task Status
@@ -56,7 +56,7 @@ Commit message requirement:
 | 00 | Revalidate admin UI stack and package plan | done | [00](00-revalidate-admin-ui-stack-and-package-plan.md) |
 | 01 | Add workspace and admin console scaffold | done | [01](01-workspace-and-admin-console-scaffold.md) |
 | 02 | Add admin auth storage, bootstrap, and sessions | done | [02](02-admin-auth-storage-bootstrap-sessions.md) |
-| 03 | Add admin read models and KPI queries | pending | [03](03-admin-read-models-and-kpi-queries.md) |
+| 03 | Add admin read models and KPI queries | done | [03](03-admin-read-models-and-kpi-queries.md) |
 | 04 | Add admin API routes and contracts | pending | [04](04-admin-api-routes-and-contracts.md) |
 | 05 | Build React admin shell, auth flow, and API client | pending | [05](05-react-admin-shell-auth-api-client.md) |
 | 06 | Build overview dashboard and KPI charts | pending | [06](06-overview-dashboard-kpi-charts.md) |
@@ -77,3 +77,5 @@ Commit message requirement:
 | 2026-05-14 | 01 | done | Added workspaces, admin contracts, Hono admin app scaffold, Vite React client scaffold, and scaffold tests. Focused test pass; client build pass; `bun test` pass (444 pass, 18 skipped); `bun run typecheck` pass; `bun run check` pass. |
 | 2026-05-14 | 02 | in_progress | Started admin auth foundation with schema, password/session helpers, middleware, bootstrap storage, and gated Postgres tests. |
 | 2026-05-14 | 02 | done | Added admin auth schema, password/session primitives, Hono auth/role middleware, bootstrap storage, and tests. Focused tests pass; `bun run check` pass. |
+| 2026-05-14 | 03 | in_progress | Started admin read model task with KPI windows, source health, content, job, retrieval, and audit read queries. |
+| 2026-05-14 | 03 | done | Added admin read models, KPI helpers, source/page/chunk/job/retrieval/audit queries, and tests. Focused tests pass; `bun run check` pass. |
