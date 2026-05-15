@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: n/a
 - Planned validation: n/a
 - Commit intent: n/a
-- Notes: Task 07 completed; next task must be started before further implementation.
+- Notes: Task 08 completed; next task must be started before further implementation.
 
 ## Task Status
 
@@ -61,7 +61,7 @@ Commit message requirement:
 | 05 | Build React admin shell, auth flow, and API client | done | [05](05-react-admin-shell-auth-api-client.md) |
 | 06 | Build overview dashboard and KPI charts | done | [06](06-overview-dashboard-kpi-charts.md) |
 | 07 | Build sources, pages, chunks, and jobs views | done | [07](07-sources-pages-chunks-jobs-views.md) |
-| 08 | Build Search Lab and result diagnostics | pending | [08](08-search-lab-result-diagnostics.md) |
+| 08 | Build Search Lab and result diagnostics | done | [08](08-search-lab-result-diagnostics.md) |
 | 09 | Add guarded admin actions and audit events | pending | [09](09-guarded-admin-actions-audit-events.md) |
 | 10 | Add optional Docker deployment and docs | pending | [10](10-optional-docker-deployment-docs.md) |
 | 11 | Final QA, traceability, and handoff | pending | [11](11-final-qa-traceability-handoff.md) |
@@ -87,3 +87,5 @@ Commit message requirement:
 | 2026-05-15 | 06 | done | Added overview data fetching, KPI cards, Recharts panels, chart helpers, unavailable/empty/loading states, and dev proxy hardening. Focused frontend tests pass; `bun run admin:client:build` pass with existing Recharts chunk-size warning; `bun run check` pass (476 pass, 23 skipped). |
 | 2026-05-15 | 07 | in_progress | Started source/content/job read views with URL-backed filters, pagination, detail routes, and job error sanitization. |
 | 2026-05-15 | 07 | done | Added source list/detail, page and chunk detail, jobs list/detail, filters, pagination links, and sanitized job errors. Focused frontend tests pass; `bun run admin:client:build` pass with existing Recharts chunk-size warning; `bun run check` pass (481 pass, 23 skipped). |
+| 2026-05-15 | 08 | in_progress | Started Search Lab with contracted request shaping, mode/limit/source controls, result diagnostics, warnings, citations, and page/chunk links. |
+| 2026-05-15 | 08 | done | Added Search Lab form, admin search mutation, result scoring diagnostics, warnings, citations, page/chunk links, zero-result and low-confidence states. Focused frontend tests pass; `bun run admin:client:build` pass with existing Recharts chunk-size warning; `bun run check` pass (486 pass, 23 skipped). |

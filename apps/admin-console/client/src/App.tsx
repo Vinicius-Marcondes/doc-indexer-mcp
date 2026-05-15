@@ -31,6 +31,7 @@ import {
   SourceDetailPage,
   SourcesPage
 } from "./resource-views";
+import { SearchLabPage } from "./search-lab";
 
 export interface LoginFormState {
   readonly email: string;
@@ -314,19 +315,6 @@ export function ShellChrome(props: {
         {props.children ?? <Outlet />}
       </section>
     </main>
-  );
-}
-
-function SearchLabPage() {
-  return (
-    <PageFrame title="Search Lab">
-      <div className="search-strip">
-        <input aria-label="Search query" placeholder="Query indexed docs" />
-        <button className="button button-primary" type="button">
-          Search
-        </button>
-      </div>
-    </PageFrame>
   );
 }
 
