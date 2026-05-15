@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: n/a
 - Planned validation: n/a
 - Commit intent: n/a
-- Notes: Task 10 completed; next task must be started before further implementation.
+- Notes: Task 11 completed; admin web interface PRD implementation is complete in this worktree.
 
 ## Task Status
 
@@ -64,7 +64,7 @@ Commit message requirement:
 | 08 | Build Search Lab and result diagnostics | done | [08](08-search-lab-result-diagnostics.md) |
 | 09 | Add guarded admin actions and audit events | done | [09](09-guarded-admin-actions-audit-events.md) |
 | 10 | Add optional Docker deployment and docs | done | [10](10-optional-docker-deployment-docs.md) |
-| 11 | Final QA, traceability, and handoff | pending | [11](11-final-qa-traceability-handoff.md) |
+| 11 | Final QA, traceability, and handoff | done | [11](11-final-qa-traceability-handoff.md) |
 
 ## Work Log
 
@@ -93,3 +93,5 @@ Commit message requirement:
 | 2026-05-15 | 09 | done | Added action contracts, admin-only mutation routes, action service/storage/audit support, source/job action panels, and migration coverage. Focused tests pass; client build pass with existing Recharts chunk-size warning; browser login smoke pass; `bun run check` pass (496 pass, 23 skipped). |
 | 2026-05-15 | 10 | in_progress | Started optional admin Docker/deployment task with config tests and static asset serving coverage. |
 | 2026-05-15 | 10 | done | Added admin Docker target/profile, static Hono asset serving, admin env examples, and deployment docs. Focused config/static tests pass; admin server typecheck pass; client build pass with existing Recharts chunk-size warning; `bun run check` pass (499 pass, 23 skipped). |
+| 2026-05-15 | 11 | in_progress | Started final QA and traceability. Found standalone admin server was serving static/health only, so runtime API composition and auth audit evidence will be closed before final gates. |
+| 2026-05-15 | 11 | done | Added standalone admin runtime API wiring, auth audit events, README/deployment handoff updates, and completed traceability. `bun test` pass; `bun run typecheck` pass; `bun run check` pass (504 pass, 23 skipped); client build pass with existing Vite chunk-size warning; admin/MCP/deployment focused tests pass; browser smoke pass with screenshot capture timeout noted. `TEST_DATABASE_URL` unset, so Postgres-gated tests skipped. |

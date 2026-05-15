@@ -61,7 +61,7 @@ Optional admin console variables:
 - `ADMIN_LOGIN_RATE_LIMIT_WINDOW_SECONDS`
 - `ADMIN_LOGIN_RATE_LIMIT_MAX_ATTEMPTS`
 
-`ADMIN_SESSION_SECRET` and `ADMIN_BOOTSTRAP_PASSWORD` must be replaced before the admin profile is started. Keep `ADMIN_COOKIE_SECURE=true` behind HTTPS in deployed environments. The admin console does not use or receive `MCP_BEARER_TOKEN`; it uses email/password sessions stored in Postgres.
+`ADMIN_BOOTSTRAP_PASSWORD` must be replaced before the admin profile is started. Keep `ADMIN_COOKIE_SECURE=true` behind HTTPS in deployed environments. The admin console does not use MCP bearer authentication and does not expose `MCP_BEARER_TOKEN` to the frontend bundle; it uses email/password sessions stored in Postgres.
 
 Embedding provider configuration:
 
@@ -100,6 +100,8 @@ docker compose -f docker-compose.remote-docs.yml --env-file .env.remote-docs --p
 ```
 
 The admin console listens on `http://localhost:3100` by default and should be placed behind the same TLS-capable reverse proxy pattern as the MCP HTTP service. Omit `--profile admin` to run only Postgres, MCP HTTP, and the docs worker.
+
+On startup, `bun apps/admin-console/server/src/index.ts` mounts the Hono admin API under `/api/admin`, serves the built Vite assets, seeds configured source definitions into Postgres, and creates the first admin user only when no admin users exist and `ADMIN_BOOTSTRAP_EMAIL` plus `ADMIN_BOOTSTRAP_PASSWORD` are present. It requires the same `DATABASE_URL` and embedding configuration as remote docs search because the Search Lab calls the same retrieval path as MCP `search_docs`.
 
 Authenticate MCP clients with:
 

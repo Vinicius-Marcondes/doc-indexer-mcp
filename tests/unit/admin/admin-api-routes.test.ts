@@ -11,7 +11,11 @@ import {
   type AdminReadModels,
   type AdminSearchService
 } from "../../../apps/admin-console/server/src/api";
-import type { AdminActionService } from "../../../apps/admin-console/server/src/actions";
+import type {
+  AdminActionAuditEvent,
+  AdminActionAuditInput,
+  AdminActionService
+} from "../../../apps/admin-console/server/src/actions";
 import {
   hashAdminPassword,
   type AdminAuthSession,
@@ -412,6 +416,24 @@ class FakeActionService implements AdminActionService {
   }
 }
 
+class FakeAuditStore {
+  readonly events: AdminActionAuditInput[] = [];
+
+  async createAuditEvent(input: AdminActionAuditInput): Promise<AdminActionAuditEvent> {
+    this.events.push(input);
+
+    return {
+      id: this.events.length,
+      actorUserId: input.actorUserId,
+      eventType: input.eventType,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      details: input.details,
+      createdAt: input.now
+    };
+  }
+}
+
 async function makeApp() {
   const authStore = new MemoryAuthStore();
   authStore.users.set(1, {
@@ -432,17 +454,19 @@ async function makeApp() {
   const readModels = new FakeReadModels();
   const searchService = new FakeSearchService();
   const actionService = new FakeActionService();
+  const auditStore = new FakeAuditStore();
   const app = createAdminApiRoutes({
     authStore,
     readModels,
     searchService,
     actionService,
+    auditStore,
     now: () => now,
     secureCookies: false,
     sessionTtlSeconds: 3600
   });
 
-  return { app, readModels, searchService, actionService };
+  return { app, readModels, searchService, actionService, auditStore };
 }
 
 async function loginCookie(app: ReturnType<typeof createAdminApiRoutes>, email = "viewer@example.com", password = "viewer-password"): Promise<string> {
@@ -482,6 +506,35 @@ describe("admin API routes", () => {
     expect(meResponse.status).toBe(200);
     expect(overviewResponse.status).toBe(200);
     expect(overviewBody.overview.totalSources).toBe(1);
+  });
+
+  test("login attempts write auth audit events without raw passwords", async () => {
+    const { app, auditStore } = await makeApp();
+    const failedResponse = await app.request("/auth/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": "admin-test",
+        "x-forwarded-for": "203.0.113.10"
+      },
+      body: JSON.stringify({ email: "viewer@example.com", password: "wrong-password" })
+    });
+    const successCookie = await loginCookie(app, "viewer@example.com", "viewer-password");
+    const serializedAudit = JSON.stringify(auditStore.events);
+
+    expect(failedResponse.status).toBe(401);
+    expect(successCookie).toContain("bun_dev_intel_admin_session=");
+    expect(auditStore.events.map((event) => event.eventType)).toEqual(["admin.auth.login_failed", "admin.auth.login_succeeded"]);
+    expect(auditStore.events[0]?.actorUserId).toBe(2);
+    expect(auditStore.events[0]?.details).toMatchObject({
+      email: "viewer@example.com",
+      status: "failed",
+      ip: "203.0.113.10",
+      userAgent: "admin-test"
+    });
+    expect(auditStore.events[1]?.actorUserId).toBe(2);
+    expect(serializedAudit).not.toContain("wrong-password");
+    expect(serializedAudit).not.toContain("viewer-password");
   });
 
   test("invalid query parameters return stable validation errors", async () => {

@@ -28,7 +28,12 @@ import {
   type AdminSearchRequest,
   type AdminSearchResponse
 } from "@bun-dev-intel/admin-contracts";
-import { isAdminActionError, type AdminActionService } from "../actions";
+import {
+  isAdminActionError,
+  type AdminActionAuditEvent,
+  type AdminActionAuditInput,
+  type AdminActionService
+} from "../actions";
 import {
   adminSessionCookieName,
   createAdminAuthMiddleware,
@@ -63,6 +68,10 @@ interface LoginRateLimiter {
   readonly clear: (key: string) => void;
 }
 
+interface AdminAuditWriter {
+  readonly createAuditEvent: (input: AdminActionAuditInput) => Promise<AdminActionAuditEvent>;
+}
+
 export interface AdminApiAuthStore extends AdminAuthStore {
   readonly getUserByEmail: (email: string) => Promise<AdminAuthUser | null>;
 }
@@ -89,6 +98,7 @@ export interface AdminApiOptions {
   readonly readModels: AdminReadModels;
   readonly searchService: AdminSearchService;
   readonly actionService?: AdminActionService;
+  readonly auditStore?: AdminAuditWriter;
   readonly now: () => string;
   readonly sessionTtlSeconds?: number;
   readonly secureCookies?: boolean;
@@ -134,6 +144,40 @@ function requestIp(context: Context): string {
 
 function loginRateLimitKey(context: Context, email: string): string {
   return `${email.trim().toLowerCase()}:${requestIp(context)}`;
+}
+
+function normalizedLoginEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+async function recordAuthAudit(
+  options: AdminApiOptions,
+  input: {
+    readonly actorUserId: number | null;
+    readonly email: string;
+    readonly eventType: "admin.auth.login_succeeded" | "admin.auth.login_failed" | "admin.auth.login_rate_limited";
+    readonly status: "succeeded" | "failed" | "rate_limited";
+    readonly context: Context;
+    readonly now: string;
+  }
+): Promise<void> {
+  if (options.auditStore === undefined) {
+    return;
+  }
+
+  await options.auditStore.createAuditEvent({
+    actorUserId: input.actorUserId,
+    eventType: input.eventType,
+    targetType: "admin_user",
+    targetId: input.actorUserId === null ? normalizedLoginEmail(input.email) : String(input.actorUserId),
+    now: input.now,
+    details: {
+      email: normalizedLoginEmail(input.email),
+      status: input.status,
+      ip: requestIp(input.context),
+      userAgent: input.context.req.header("user-agent") ?? null
+    }
+  });
 }
 
 async function parseJsonBody(context: Context): Promise<unknown | null> {
@@ -278,8 +322,17 @@ export function createAdminApiRoutes(options: AdminApiOptions): Hono<AdminApiEnv
     }
 
     const limiterKey = loginRateLimitKey(context, parsed.data.email);
+    const attemptedAt = options.now();
 
     if (options.loginRateLimiter?.isLimited(limiterKey) === true) {
+      await recordAuthAudit(options, {
+        actorUserId: null,
+        email: parsed.data.email,
+        eventType: "admin.auth.login_rate_limited",
+        status: "rate_limited",
+        context,
+        now: attemptedAt
+      });
       return jsonError(context, 429, "rate_limited", "Too many login attempts.");
     }
 
@@ -288,6 +341,14 @@ export function createAdminApiRoutes(options: AdminApiOptions): Hono<AdminApiEnv
 
     if (user === null || user.disabledAt !== null || !validPassword) {
       options.loginRateLimiter?.recordFailure(limiterKey);
+      await recordAuthAudit(options, {
+        actorUserId: user?.id ?? null,
+        email: parsed.data.email,
+        eventType: "admin.auth.login_failed",
+        status: "failed",
+        context,
+        now: attemptedAt
+      });
       return jsonError(context, 401, "invalid_credentials", "Invalid email or password.");
     }
 
@@ -295,10 +356,18 @@ export function createAdminApiRoutes(options: AdminApiOptions): Hono<AdminApiEnv
     const created = await createAdminSession({
       store: options.authStore,
       userId: user.id,
-      now: options.now,
+      now: () => attemptedAt,
       ttlSeconds: sessionTtlSeconds,
       userAgent: context.req.header("user-agent"),
       ip: requestIp(context)
+    });
+    await recordAuthAudit(options, {
+      actorUserId: user.id,
+      email: user.email,
+      eventType: "admin.auth.login_succeeded",
+      status: "succeeded",
+      context,
+      now: attemptedAt
     });
 
     context.header("Set-Cookie", createAdminSessionCookie({ token: created.token, expiresAt: created.session.expiresAt, secure: secureCookies }));

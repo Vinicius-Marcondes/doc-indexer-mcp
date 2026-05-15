@@ -1,17 +1,25 @@
 import { createAdminConsoleApp } from "./app";
+import { startAdminConsoleServer } from "./runtime";
 
-const app = createAdminConsoleApp({
-  staticAssetsRoot: Bun.env.ADMIN_STATIC_ASSETS_DIR ?? "apps/admin-console/client/dist"
-});
-const port = Number(Bun.env.ADMIN_HTTP_PORT ?? 3100);
-const hostname = Bun.env.ADMIN_HTTP_HOST ?? "0.0.0.0";
+if (import.meta.main) {
+  const result = await startAdminConsoleServer();
 
-Bun.serve({
-  hostname,
-  port,
-  fetch: app.fetch
-});
+  if (!result.ok) {
+    process.stderr.write(`bun-dev-intel-admin-console startup failed: ${result.error.message}\n`);
 
-process.stderr.write(`bun-dev-intel-admin-console listening on ${hostname}:${port}\n`);
+    for (const issue of result.error.issues ?? []) {
+      process.stderr.write(`- ${issue.path}: ${issue.message}\n`);
+    }
 
-export { createAdminConsoleApp };
+    process.exit(1);
+  }
+
+  process.stderr.write(`bun-dev-intel-admin-console listening on ${result.host}:${result.port}\n`);
+}
+
+export { createAdminConsoleApp, startAdminConsoleServer };
+export {
+  parseAdminRuntimeConfig,
+  createAdminRuntimeApp,
+  SearchDocsAdminSearchService
+} from "./runtime";
