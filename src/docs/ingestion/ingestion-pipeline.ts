@@ -79,6 +79,16 @@ function addSeconds(isoTimestamp: string, seconds: number): string {
   return new Date(Date.parse(isoTimestamp) + seconds * 1000).toISOString();
 }
 
+function pageIngestionWarning(url: string, error: StructuredError): ResponseWarning {
+  return {
+    id: "docs_page_ingestion_failed",
+    title: "Docs page skipped during source index refresh",
+    detail: "The source index refresh skipped one discovered page after it failed to ingest.",
+    evidence: [url, error.code],
+    sources: [url]
+  };
+}
+
 export class BunDocsIngestionPipeline {
   private readonly storage: RemoteDocsStorage;
   private readonly discoveryClient: BunDocsDiscoveryClient;
@@ -113,18 +123,27 @@ export class BunDocsIngestionPipeline {
       },
       discovered.warnings
     );
+    let successfulPages = 0;
+    let firstPageError: StructuredError | undefined;
 
     for (const page of pages) {
       const result = await this.ingestPage(page.url);
       summary = mergeSummary(summary, result.summary);
 
       if (!result.ok) {
-        return {
-          ok: false,
-          error: result.error,
-          summary
-        };
+        firstPageError ??= result.error;
+        summary = withWarnings(summary, [pageIngestionWarning(page.url, result.error)]);
+      } else {
+        successfulPages += 1;
       }
+    }
+
+    if (pages.length > 0 && successfulPages === 0 && firstPageError !== undefined) {
+      return {
+        ok: false,
+        error: firstPageError,
+        summary
+      };
     }
 
     return {
