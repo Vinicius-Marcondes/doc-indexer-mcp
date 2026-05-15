@@ -3,12 +3,22 @@ import { FakeEmbeddingProvider } from "../../../../src/docs/embeddings/fake-prov
 import { createEmbeddingProviderFailure, type EmbedTextsRequest, type EmbedTextsResult } from "../../../../src/docs/embeddings/provider";
 import { BunDocsIngestionPipeline } from "../../../../src/docs/ingestion/ingestion-pipeline";
 import { BunDocsDiscoveryClient, BUN_DOCS_PRIMARY_INDEX_URL, type DocsSourceFetchLike } from "../../../../src/docs/sources/bun-docs-discovery";
-import { RemoteDocsStorage } from "../../../../src/docs/storage/docs-storage";
+import {
+  RemoteDocsStorage,
+  type DocChunk,
+  type DocEmbedding,
+  type DocPage,
+  type InsertChunksInput,
+  type InsertEmbeddingInput,
+  type UpsertPageInput,
+  type UpsertSourceInput
+} from "../../../../src/docs/storage/docs-storage";
 import type { SqlClient } from "../../../../src/docs/storage/database";
 import { createRemoteDocsTestDatabase } from "../../storage/test-harness";
 
 const fetchedAt = "2026-05-14T12:00:00.000Z";
 const pageUrl = "https://bun.com/docs/runtime/http/server";
+const failingPageUrl = "https://bun.com/docs/runtime/missing";
 
 function response(body: string, init: ResponseInit & { url?: string } = {}): Response {
   const result = new Response(body, init);
@@ -28,6 +38,36 @@ function createFetch(pageBody: () => string): DocsSourceFetchLike {
 
     if (url === pageUrl) {
       return response(pageBody(), {
+        status: 200,
+        headers: { "content-type": "text/html" },
+        url: pageUrl
+      });
+    }
+
+    return response("not found", { status: 404, url });
+  };
+}
+
+function createMixedIndexFetch(): DocsSourceFetchLike {
+  return async (url) => {
+    if (url === BUN_DOCS_PRIMARY_INDEX_URL) {
+      return response(
+        [
+          "# Bun Docs",
+          "",
+          `- [Missing](${failingPageUrl})`,
+          `- [HTTP server](${pageUrl})`
+        ].join("\n"),
+        { status: 200, url: BUN_DOCS_PRIMARY_INDEX_URL }
+      );
+    }
+
+    if (url === failingPageUrl) {
+      return response("not found", { status: 404, statusText: "Not Found", url });
+    }
+
+    if (url === pageUrl) {
+      return response("<main><h1>HTTP server</h1><p>Use <code>Bun.serve</code>.</p></main>", {
         status: 200,
         headers: { "content-type": "text/html" },
         url: pageUrl
@@ -77,6 +117,85 @@ class CountingFakeEmbeddingProvider extends FakeEmbeddingProvider {
     this.calls += 1;
     this.texts += request.texts.length;
     return super.embedTexts(request);
+  }
+}
+
+class InMemoryPartialStorage {
+  page: DocPage | null = null;
+  chunks: DocChunk[] = [];
+  private embeddings = new Map<number, DocEmbedding>();
+  private nextChunkId = 1;
+  private nextEmbeddingId = 1;
+
+  async upsertSource(_input: UpsertSourceInput): Promise<unknown> {
+    return {};
+  }
+
+  async getPageByCanonicalUrl(_sourceId: string, canonicalUrl: string): Promise<DocPage | null> {
+    return this.page?.canonicalUrl === canonicalUrl ? this.page : null;
+  }
+
+  async upsertPage(input: UpsertPageInput): Promise<DocPage> {
+    this.page = {
+      id: this.page?.id ?? 1,
+      sourceId: input.sourceId,
+      url: input.url,
+      canonicalUrl: input.canonicalUrl,
+      title: input.title,
+      contentHash: input.contentHash
+    };
+
+    return this.page;
+  }
+
+  async deleteChunksForPage(_pageId: number): Promise<number> {
+    const count = this.chunks.length;
+    this.chunks = [];
+    this.embeddings.clear();
+    return count;
+  }
+
+  async insertChunks(input: InsertChunksInput): Promise<DocChunk[]> {
+    this.chunks = input.chunks.map((chunk) => ({
+      id: this.nextChunkId++,
+      sourceId: input.sourceId,
+      pageId: input.pageId,
+      url: chunk.url,
+      title: chunk.title,
+      headingPath: chunk.headingPath,
+      chunkIndex: chunk.chunkIndex,
+      content: chunk.content,
+      contentHash: chunk.contentHash,
+      tokenEstimate: chunk.tokenEstimate
+    }));
+
+    return this.chunks;
+  }
+
+  async getChunksForPage(_pageId: number): Promise<DocChunk[]> {
+    return this.chunks;
+  }
+
+  async getEmbeddingForChunk(input: { readonly chunkId: number }): Promise<DocEmbedding | null> {
+    return this.embeddings.get(input.chunkId) ?? null;
+  }
+
+  async insertEmbedding(input: InsertEmbeddingInput): Promise<DocEmbedding> {
+    const embedding: DocEmbedding = {
+      id: this.nextEmbeddingId++,
+      chunkId: input.chunkId,
+      provider: input.provider,
+      model: input.model,
+      embeddingVersion: input.embeddingVersion,
+      dimensions: input.dimensions
+    };
+    this.embeddings.set(input.chunkId, embedding);
+    return embedding;
+  }
+
+  clearChunksAndEmbeddings(): void {
+    this.chunks = [];
+    this.embeddings.clear();
   }
 }
 
@@ -217,6 +336,74 @@ describe("docs ingestion pipeline", () => {
       expect(await rowCount(database.sql, "doc_embeddings")).toBe(0);
     } finally {
       await database.cleanup();
+    }
+  });
+
+  test("rebuilds chunks when an unchanged page has no stored chunks", async () => {
+    const storage = new InMemoryPartialStorage();
+    const provider = new CountingFakeEmbeddingProvider({ dimensions: 1536 });
+    const pipeline = createPipeline(
+      storage as unknown as RemoteDocsStorage,
+      createFetch(() => "<main><h1>HTTP server</h1><p>Use <code>Bun.serve</code>.</p></main>"),
+      provider
+    );
+    const first = await pipeline.ingestPage(pageUrl);
+
+    expect(first.ok).toBe(true);
+    expect(storage.chunks.length).toBeGreaterThan(0);
+
+    storage.clearChunksAndEmbeddings();
+
+    const second = await pipeline.ingestPage(pageUrl);
+
+    expect(second.ok).toBe(true);
+    expect(storage.chunks.length).toBeGreaterThan(0);
+
+    if (second.ok) {
+      expect(second.summary.pagesUnchanged).toBe(1);
+      expect(second.summary.chunksStored).toBe(storage.chunks.length);
+      expect(second.summary.embeddingsCreated).toBe(storage.chunks.length);
+      expect(second.summary.chunksReused).toBe(0);
+    }
+  });
+
+  test("source index continues after one discovered page fails", async () => {
+    const storage = new InMemoryPartialStorage();
+    const pipeline = createPipeline(storage as unknown as RemoteDocsStorage, createMixedIndexFetch());
+
+    const result = await pipeline.ingestFromIndex();
+
+    expect(result.ok).toBe(true);
+    expect(storage.page?.canonicalUrl).toBe(pageUrl);
+    expect(storage.chunks.length).toBeGreaterThan(0);
+
+    if (result.ok) {
+      expect(result.summary.pagesDiscovered).toBe(2);
+      expect(result.summary.pagesStored).toBe(1);
+      expect(result.summary.warnings).toContainEqual({
+        id: "docs_page_ingestion_failed",
+        title: "Docs page skipped during source index refresh",
+        detail: "The source index refresh skipped one discovered page after it failed to ingest.",
+        evidence: [failingPageUrl, "fetch_failed"],
+        sources: [failingPageUrl]
+      });
+    }
+  });
+
+  test("source index fails when every selected discovered page fails", async () => {
+    const storage = new InMemoryPartialStorage();
+    const pipeline = createPipeline(storage as unknown as RemoteDocsStorage, createMixedIndexFetch());
+
+    const result = await pipeline.ingestFromIndex({ limit: 1 });
+
+    expect(result.ok).toBe(false);
+    expect(storage.page).toBeNull();
+
+    if (!result.ok) {
+      expect(result.error.code).toBe("fetch_failed");
+      expect(result.summary.pagesDiscovered).toBe(2);
+      expect(result.summary.pagesStored).toBe(0);
+      expect(result.summary.warnings).toHaveLength(1);
     }
   });
 

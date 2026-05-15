@@ -30,6 +30,7 @@ export interface RemoteDocsConfig {
   };
   readonly refresh: {
     readonly interval: RefreshInterval;
+    readonly runningTimeoutSeconds: number;
     readonly maxPagesPerRun: number;
     readonly maxEmbeddingsPerRun: number;
     readonly maxConcurrency: number;
@@ -249,6 +250,10 @@ export function parseRemoteDocsConfig(env: Record<string, string | undefined>): 
   const maxPagesPerRun = parseInteger(env, "DOCS_REFRESH_MAX_PAGES_PER_RUN", 500, issues, { min: 1, max: 100000 });
   const maxEmbeddingsPerRun = parseInteger(env, "DOCS_REFRESH_MAX_EMBEDDINGS_PER_RUN", 2000, issues, { min: 1, max: 100000 });
   const maxConcurrency = parseInteger(env, "DOCS_REFRESH_MAX_CONCURRENCY", 4, issues, { min: 1, max: 64 });
+  const runningTimeoutSeconds = parseInteger(env, "DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS", 1800, issues, {
+    min: 60,
+    max: 86400
+  });
 
   validateBearerToken(bearerToken, mode === "test", issues);
   parseDatabaseUrl(databaseUrl, issues);
@@ -306,6 +311,7 @@ export function parseRemoteDocsConfig(env: Record<string, string | undefined>): 
       },
       refresh: {
         interval: refreshInterval,
+        runningTimeoutSeconds,
         maxPagesPerRun,
         maxEmbeddingsPerRun,
         maxConcurrency

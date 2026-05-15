@@ -29,6 +29,12 @@ export interface RefreshWorkerJob extends RefreshQueueStoredJob {
 }
 
 export interface DocsRefreshWorkerStore extends RefreshQueueStore {
+  readonly recoverStaleRunningRefreshJobs: (input: {
+    readonly now: string;
+    readonly staleBefore: string;
+    readonly limit: number;
+    readonly timeoutSeconds: number;
+  }) => Promise<readonly RefreshWorkerJob[]>;
   readonly claimRunnableRefreshJobs: (input: {
     readonly limit: number;
     readonly now: string;
@@ -71,12 +77,14 @@ export interface DocsRefreshWorkerOptions {
   readonly queue: RefreshJobQueue;
   readonly executor: DocsRefreshJobExecutor;
   readonly sourceRegistry: DocsSourceRegistry;
+  readonly logger?: DocsRefreshWorkerLogger;
   readonly now: () => string;
   readonly refreshIntervalSeconds: number;
   readonly maxJobsPerRun: number;
   readonly maxPagesPerRun: number;
   readonly maxEmbeddingsPerRun: number;
   readonly maxConcurrency: number;
+  readonly runningJobTimeoutSeconds: number;
 }
 
 export interface ScheduledRefreshResult {
@@ -86,14 +94,29 @@ export interface ScheduledRefreshResult {
   readonly skipped: number;
 }
 
+export interface DocsRefreshWorkerLogger {
+  readonly info: (message: string) => void;
+  readonly error: (message: string) => void;
+}
+
 export interface DocsRefreshWorkerRunResult {
   readonly processed: number;
   readonly succeeded: number;
   readonly failed: number;
+  readonly recovered?: DocsRefreshWorkerRecoveryResult;
 }
 
 export interface DocsRefreshWorkerCycleResult extends DocsRefreshWorkerRunResult {
   readonly scheduled: ScheduledRefreshResult;
+}
+
+export interface DocsRefreshWorkerRecoveryResult {
+  readonly staleRunningFailed: number;
+}
+
+interface SourceExclusiveJobSelection {
+  readonly executableJobs: readonly RefreshWorkerJob[];
+  readonly skippedJobs: readonly RefreshWorkerJob[];
 }
 
 export function shouldEnqueueScheduledRefresh(input: {
@@ -137,6 +160,71 @@ function structuredErrorText(error: StructuredError): string {
   });
 }
 
+function sanitizeLogField(value: string): string {
+  const redacted = value
+    .replace(/Authorization\s*:\s*Bearer\s+[^\s"']+/giu, "[redacted authorization]")
+    .replace(/Bearer\s+[^\s"']+/giu, "Bearer [redacted]")
+    .replace(/sk-[A-Za-z0-9_-]+/gu, "[redacted]");
+
+  return redacted.length > 200 ? `${redacted.slice(0, 197)}...` : redacted;
+}
+
+function sanitizeCauseMessage(value: string): string {
+  return sanitizeLogField(
+    value.replace(
+      /\b(?:(?:full|raw)\s+)?(?:page|request|response|source|document)\s+(?:content|payload|body)\b|\b(?:full|raw)\s+(?:content|payload|body)\b/giu,
+      "[redacted content]"
+    )
+  );
+}
+
+function errorCauseDetails(error: unknown): { readonly causeName: string; readonly causeMessage?: string } {
+  if (error instanceof Error) {
+    const causeName = sanitizeLogField(error.name.length > 0 ? error.name : "Error");
+    const causeMessage = sanitizeCauseMessage(error.message);
+
+    return {
+      causeName,
+      ...(causeMessage.length === 0 ? {} : { causeMessage })
+    };
+  }
+
+  if (typeof error === "string") {
+    return {
+      causeName: "ThrownString",
+      causeMessage: sanitizeCauseMessage(error)
+    };
+  }
+
+  return {
+    causeName: "ThrownNonError"
+  };
+}
+
+export function formatDocsWorkerJobFailureLog(input: {
+  readonly id: number;
+  readonly sourceId: string;
+  readonly jobType: RefreshJobType;
+  readonly status: "failed";
+  readonly code: string;
+  readonly message: string;
+  readonly causeName?: string;
+  readonly causeMessage?: string;
+}): string {
+  const causeName = input.causeName === undefined ? "" : ` causeName=${sanitizeLogField(input.causeName)}`;
+  const causeMessage =
+    input.causeMessage === undefined ? "" : ` causeMessage=${JSON.stringify(sanitizeCauseMessage(input.causeMessage))}`;
+
+  return (
+    `bun-dev-intel-mcp docs worker job failed id=${input.id} source=${input.sourceId} type=${input.jobType} ` +
+    `status=${input.status} code=${input.code} message=${JSON.stringify(sanitizeLogField(input.message))}${causeName}${causeMessage}`
+  );
+}
+
+export function formatDocsWorkerRecoveryLog(input: { readonly staleRunningFailed: number }): string {
+  return `bun-dev-intel-mcp docs worker recovered stale running jobs count=${input.staleRunningFailed}`;
+}
+
 async function runWithConcurrency<T>(
   items: readonly T[],
   concurrency: number,
@@ -166,12 +254,57 @@ function missingUrlError(job: RefreshWorkerJob): StructuredError {
   });
 }
 
+function unexpectedJobExecutionError(job: RefreshWorkerJob, error: unknown): StructuredError {
+  const cause = errorCauseDetails(error);
+
+  return createStructuredError("internal_error", "Docs refresh job failed unexpectedly.", {
+    jobId: job.id,
+    sourceId: job.sourceId,
+    jobType: job.jobType,
+    ...cause
+  });
+}
+
 function normalizeLimit(value: number): number {
   if (!Number.isFinite(value)) {
     return 1;
   }
 
   return Math.max(1, Math.floor(value));
+}
+
+function normalizeTimeoutSeconds(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1800;
+  }
+
+  return Math.min(86400, Math.max(60, Math.floor(value)));
+}
+
+function selectSourceExclusiveJobs(jobs: readonly RefreshWorkerJob[]): SourceExclusiveJobSelection {
+  const sourcesWithBroadJobs = new Set(
+    jobs.filter((job) => job.jobType === "source_index").map((job) => job.sourceId)
+  );
+
+  if (sourcesWithBroadJobs.size === 0) {
+    return {
+      executableJobs: jobs,
+      skippedJobs: []
+    };
+  }
+
+  const executableJobs: RefreshWorkerJob[] = [];
+  const skippedJobs: RefreshWorkerJob[] = [];
+
+  for (const job of jobs) {
+    if (job.jobType !== "source_index" && sourcesWithBroadJobs.has(job.sourceId)) {
+      skippedJobs.push(job);
+    } else {
+      executableJobs.push(job);
+    }
+  }
+
+  return { executableJobs, skippedJobs };
 }
 
 function hasTombstonePolicyStore(store: DocsRefreshWorkerStore): store is DocsRefreshWorkerStore & DocsTombstonePolicyStore {
@@ -185,24 +318,28 @@ export class DocsRefreshWorker {
   private readonly queue: RefreshJobQueue;
   private readonly executor: DocsRefreshJobExecutor;
   private readonly sourceRegistry: DocsSourceRegistry;
+  private readonly logger?: DocsRefreshWorkerLogger;
   private readonly now: () => string;
   private readonly refreshIntervalSeconds: number;
   private readonly maxJobsPerRun: number;
   private readonly maxPagesPerRun: number;
   private readonly maxEmbeddingsPerRun: number;
   private readonly maxConcurrency: number;
+  private readonly runningJobTimeoutSeconds: number;
 
   constructor(options: DocsRefreshWorkerOptions) {
     this.store = options.store;
     this.queue = options.queue;
     this.executor = options.executor;
     this.sourceRegistry = options.sourceRegistry;
+    this.logger = options.logger;
     this.now = options.now;
     this.refreshIntervalSeconds = normalizeLimit(options.refreshIntervalSeconds);
     this.maxJobsPerRun = normalizeLimit(options.maxJobsPerRun);
     this.maxPagesPerRun = normalizeLimit(options.maxPagesPerRun);
     this.maxEmbeddingsPerRun = normalizeLimit(options.maxEmbeddingsPerRun);
     this.maxConcurrency = normalizeLimit(options.maxConcurrency);
+    this.runningJobTimeoutSeconds = normalizeTimeoutSeconds(options.runningJobTimeoutSeconds);
   }
 
   async enqueueScheduledRefresh(): Promise<ScheduledRefreshResult> {
@@ -257,15 +394,38 @@ export class DocsRefreshWorker {
   }
 
   async runOnce(): Promise<DocsRefreshWorkerRunResult> {
+    const now = this.now();
+    const recovered = await this.recoverStaleRunningJobs(now);
     const jobs = await this.store.claimRunnableRefreshJobs({
       limit: this.maxJobsPerRun,
-      now: this.now()
+      now
     });
+    const { executableJobs, skippedJobs } = selectSourceExclusiveJobs(jobs);
     let succeeded = 0;
     let failed = 0;
 
-    await runWithConcurrency(jobs, this.maxConcurrency, async (job) => {
-      const result = await this.executeJob(job);
+    await Promise.all(
+      skippedJobs.map((job) =>
+        this.store.updateRefreshJobStatus({
+          id: job.id,
+          status: "queued",
+          now
+        })
+      )
+    );
+
+    await runWithConcurrency(executableJobs, this.maxConcurrency, async (job) => {
+      let result: DocsRefreshExecutionResult;
+
+      try {
+        result = await this.executeJob(job);
+      } catch (error) {
+        result = {
+          ok: false,
+          error: unexpectedJobExecutionError(job, error)
+        };
+      }
+
       const finishedAt = this.now();
 
       if (result.ok) {
@@ -284,6 +444,18 @@ export class DocsRefreshWorker {
         lastError: structuredErrorText(result.error),
         now: finishedAt
       });
+      this.logger?.error(
+        formatDocsWorkerJobFailureLog({
+          id: job.id,
+          sourceId: job.sourceId,
+          jobType: job.jobType,
+          status: "failed",
+          code: result.error.code,
+          message: result.error.message,
+          ...(typeof result.error.details?.causeName === "string" ? { causeName: result.error.details.causeName } : {}),
+          ...(typeof result.error.details?.causeMessage === "string" ? { causeMessage: result.error.details.causeMessage } : {})
+        })
+      );
 
       if (job.url !== null && hasTombstonePolicyStore(this.store)) {
         await recordTombstoneRefreshFailure({
@@ -299,9 +471,10 @@ export class DocsRefreshWorker {
     });
 
     return {
-      processed: jobs.length,
+      processed: executableJobs.length,
       succeeded,
-      failed
+      failed,
+      recovered
     };
   }
 
@@ -339,6 +512,27 @@ export class DocsRefreshWorker {
           ...(job.url === null ? {} : { url: job.url })
         });
     }
+  }
+
+  private async recoverStaleRunningJobs(now: string): Promise<DocsRefreshWorkerRecoveryResult> {
+    const nowMs = Date.parse(now);
+    const baseMs = Number.isNaN(nowMs) ? Date.now() : nowMs;
+    const staleBefore = new Date(baseMs - this.runningJobTimeoutSeconds * 1000).toISOString();
+    const recovered = await this.store.recoverStaleRunningRefreshJobs({
+      now,
+      staleBefore,
+      limit: this.maxJobsPerRun,
+      timeoutSeconds: this.runningJobTimeoutSeconds
+    });
+    const result = {
+      staleRunningFailed: recovered.length
+    };
+
+    if (result.staleRunningFailed > 0) {
+      this.logger?.info(formatDocsWorkerRecoveryLog(result));
+    }
+
+    return result;
   }
 }
 

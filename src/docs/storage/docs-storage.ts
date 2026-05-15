@@ -390,6 +390,20 @@ function validateEmbedding(input: InsertEmbeddingInput): void {
   }
 }
 
+function validateExistingEmbeddingCompatibility(input: InsertEmbeddingInput, existing: DocEmbedding): void {
+  if (existing.chunkId !== input.chunkId) {
+    throw new Error("Existing embedding chunk does not match requested chunk.");
+  }
+
+  if (existing.provider !== input.provider || existing.model !== input.model || existing.embeddingVersion !== input.embeddingVersion) {
+    throw new Error("Existing embedding metadata does not match requested embedding.");
+  }
+
+  if (existing.dimensions !== input.dimensions) {
+    throw new Error(`Existing embedding dimensions ${existing.dimensions} do not match requested dimensions ${input.dimensions}.`);
+  }
+}
+
 export class RemoteDocsStorage {
   constructor(private readonly sql: SqlClient) {}
 
@@ -606,6 +620,14 @@ export class RemoteDocsStorage {
             ${chunk.contentHash},
             ${chunk.tokenEstimate}
           )
+          on conflict (source_id, page_id, content_hash) do update set
+            url = excluded.url,
+            title = excluded.title,
+            heading_path = excluded.heading_path,
+            chunk_index = excluded.chunk_index,
+            content = excluded.content,
+            token_estimate = excluded.token_estimate,
+            updated_at = now()
           returning id, source_id, page_id, url, title, heading_path, chunk_index, content, content_hash, token_estimate
         `;
 
@@ -702,10 +724,29 @@ export class RemoteDocsStorage {
     const rows = await this.sql<EmbeddingRow[]>`
       insert into doc_embeddings (chunk_id, provider, model, embedding_version, dimensions, embedding)
       values (${input.chunkId}, ${input.provider}, ${input.model}, ${input.embeddingVersion}, ${input.dimensions}, ${vectorLiteral}::vector)
+      on conflict (chunk_id, provider, model, embedding_version) do nothing
       returning id, chunk_id, provider, model, embedding_version, dimensions
     `;
+    const inserted = rows[0];
 
-    return mapEmbedding(requiredRow(rows, "insertEmbedding"));
+    if (inserted !== undefined) {
+      return mapEmbedding(inserted);
+    }
+
+    const existing = await this.getEmbeddingForChunk({
+      chunkId: input.chunkId,
+      provider: input.provider,
+      model: input.model,
+      embeddingVersion: input.embeddingVersion
+    });
+
+    if (existing === null) {
+      throw new Error("Expected existing embedding after idempotent insert conflict.");
+    }
+
+    validateExistingEmbeddingCompatibility(input, existing);
+
+    return existing;
   }
 
   async createRefreshJob(input: CreateRefreshJobInput): Promise<RefreshJob> {
@@ -825,6 +866,70 @@ export class RemoteDocsStorage {
         limit ${input.limit}
         for update skip locked
       )
+      returning
+        id,
+        source_id,
+        url,
+        job_type,
+        reason,
+        status,
+        priority,
+        run_after::text as run_after,
+        attempt_count,
+        last_error,
+        created_at::text as created_at,
+        updated_at::text as updated_at,
+        finished_at::text as finished_at
+    `;
+
+    return rows.map(mapRefreshJob);
+  }
+
+  async recoverStaleRunningRefreshJobs(input: {
+    readonly now: string;
+    readonly staleBefore: string;
+    readonly limit: number;
+    readonly timeoutSeconds: number;
+  }): Promise<RefreshJob[]> {
+    const rows = await this.sql<RefreshJobRow[]>`
+      with stale as (
+        select id
+        from doc_refresh_jobs
+        where status = 'running'
+          and coalesce(started_at, updated_at) <= ${input.staleBefore}
+        order by coalesce(started_at, updated_at) asc, id asc
+        limit ${input.limit}
+        for update skip locked
+      )
+      update doc_refresh_jobs
+      set
+        status = 'failed',
+        last_error = json_build_object(
+          'code',
+          'internal_error',
+          'message',
+          'Docs refresh job exceeded running timeout.',
+          'details',
+          json_build_object(
+            'jobId',
+            doc_refresh_jobs.id,
+            'sourceId',
+            doc_refresh_jobs.source_id,
+            'jobType',
+            doc_refresh_jobs.job_type,
+            'attemptCount',
+            doc_refresh_jobs.attempt_count,
+            'startedAt',
+            coalesce(doc_refresh_jobs.started_at, doc_refresh_jobs.updated_at)::text,
+            'timeoutSeconds',
+            ${input.timeoutSeconds}::integer,
+            'ageSeconds',
+            greatest(0, floor(extract(epoch from (${input.now}::timestamptz - coalesce(doc_refresh_jobs.started_at, doc_refresh_jobs.updated_at))))::integer)
+          )
+        )::text,
+        updated_at = ${input.now},
+        finished_at = ${input.now}
+      where id in (select id from stale)
       returning
         id,
         source_id,

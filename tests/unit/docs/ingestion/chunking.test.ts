@@ -62,6 +62,21 @@ describe("docs chunking", () => {
     expect(socketChunk?.headingPath).toEqual(["Runtime", "HTTP server", "WebSocket"]);
   });
 
+  test("does not emit sparse heading paths when heading levels are skipped", () => {
+    const result = chunkDocsPage({
+      ...baseInput,
+      content: [
+        "### Skipped parent levels",
+        "",
+        "This page starts below h1 and h2, but the heading path must still be dense."
+      ].join("\n"),
+      chunking: { targetTokens: 80, overlapTokens: 0 }
+    });
+
+    expect(result.chunks[0]?.headingPath).toEqual(["Skipped parent levels"]);
+    expect(result.chunks.flatMap((chunk) => chunk.headingPath)).not.toContain(undefined);
+  });
+
   test("preserves code blocks and API identifiers", () => {
     const result = chunkDocsPage({
       ...baseInput,
@@ -96,6 +111,17 @@ describe("docs chunking", () => {
 
     expect(second.pageContentHash).toBe(first.pageContentHash);
     expect(second.chunks.map((chunk) => chunk.contentHash)).toEqual(first.chunks.map((chunk) => chunk.contentHash));
+  });
+
+  test("keeps repeated chunk content hashes unique within a page", () => {
+    const result = chunkDocsPage({
+      ...baseInput,
+      content: "Repeated docs paragraph.\n\nRepeated docs paragraph.",
+      chunking: { targetTokens: 6, overlapTokens: 0 }
+    });
+
+    expect(result.chunks).toHaveLength(2);
+    expect(new Set(result.chunks.map((chunk) => chunk.contentHash)).size).toBe(result.chunks.length);
   });
 
   test("different content changes relevant hashes", () => {

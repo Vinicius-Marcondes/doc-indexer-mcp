@@ -9,7 +9,8 @@ const requiredEnvNames = [
   "EMBEDDING_PROVIDER",
   "OPENAI_API_KEY",
   "OPENAI_EMBEDDING_MODEL",
-  "DOCS_REFRESH_INTERVAL"
+  "DOCS_REFRESH_INTERVAL",
+  "DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS"
 ] as const;
 
 async function readText(path: string): Promise<string> {
@@ -87,5 +88,14 @@ describe("remote docs Docker deployment config", () => {
     expect(docs).toContain("bun src/http.ts");
     expect(docs).toContain("bun src/docs-worker.ts");
     expect(docs).toContain("runRemoteDocsMigrations");
+  });
+
+  test("env example and deployment docs cover stale running job recovery", async () => {
+    const env = await readText(".env.remote-docs.example");
+    const docs = await readText("docs/deployment/remote-docs-http.md");
+
+    expect(env).toContain("DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS=1800");
+    expect(docs).toContain("DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS");
+    expect(docs).toContain("stale `running`");
   });
 });

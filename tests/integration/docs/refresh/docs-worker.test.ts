@@ -12,7 +12,8 @@ import type {
   RefreshJobReason,
   RefreshJobType
 } from "../../../../src/docs/storage/docs-storage";
-import { defaultDocsSourceRegistry } from "../../../../src/docs/sources/bun-source-pack";
+import { bunDocsSourcePack, createDocsSourceRegistry, defaultDocsSourceRegistry, type DocsSourcePack } from "../../../../src/docs/sources/bun-source-pack";
+import type { DocsSourceRegistry } from "../../../../src/docs/sources/registry";
 
 const now = "2026-05-14T12:00:00.000Z";
 const pageUrl = "https://bun.com/docs/runtime/http-server";
@@ -20,6 +21,7 @@ const pageUrl = "https://bun.com/docs/runtime/http-server";
 type MutableWorkerJob = RefreshQueueStoredJob & {
   createdAt: string;
   updatedAt: string;
+  startedAt: string | null;
   finishedAt: string | null;
   attemptCount: number;
 };
@@ -28,7 +30,15 @@ class InMemoryWorkerStore implements DocsRefreshWorkerStore {
   readonly jobs: MutableWorkerJob[] = [];
   nextId = 1;
 
-  seed(input: Partial<CreateRefreshJobInput> & { status?: MutableWorkerJob["status"]; createdAt?: string } = {}) {
+  seed(
+    input: Partial<CreateRefreshJobInput> & {
+      status?: MutableWorkerJob["status"];
+      createdAt?: string;
+      startedAt?: string | null;
+      attemptCount?: number;
+    } = {}
+  ) {
+    const timestamp = input.createdAt ?? now;
     const job: MutableWorkerJob = {
       id: this.nextId,
       sourceId: input.sourceId ?? "bun",
@@ -38,10 +48,11 @@ class InMemoryWorkerStore implements DocsRefreshWorkerStore {
       status: input.status ?? "queued",
       priority: input.priority ?? 50,
       runAfter: input.runAfter ?? now,
-      createdAt: input.createdAt ?? now,
-      updatedAt: input.createdAt ?? now,
-      finishedAt: input.status === "succeeded" || input.status === "failed" ? input.createdAt ?? now : null,
-      attemptCount: 0
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      startedAt: input.startedAt ?? (input.status === "running" ? timestamp : null),
+      finishedAt: input.status === "succeeded" || input.status === "failed" ? timestamp : null,
+      attemptCount: input.attemptCount ?? 0
     };
     this.nextId += 1;
     this.jobs.push(job);
@@ -86,6 +97,7 @@ class InMemoryWorkerStore implements DocsRefreshWorkerStore {
     for (const job of runnable) {
       job.status = "running";
       job.attemptCount += 1;
+      job.startedAt = input.now;
       job.updatedAt = input.now;
     }
 
@@ -106,10 +118,53 @@ class InMemoryWorkerStore implements DocsRefreshWorkerStore {
     job.status = input.status;
     job.lastError = input.lastError;
     job.updatedAt = input.now ?? now;
+    if (input.status === "running") {
+      job.startedAt = input.now ?? now;
+    }
     if (input.status === "succeeded" || input.status === "failed") {
       job.finishedAt = input.now ?? now;
     }
     return job;
+  }
+
+  async recoverStaleRunningRefreshJobs(input: {
+    now: string;
+    staleBefore: string;
+    limit: number;
+    timeoutSeconds: number;
+  }): Promise<MutableWorkerJob[]> {
+    const staleBeforeMs = Date.parse(input.staleBefore);
+    const nowMs = Date.parse(input.now);
+    const stale = this.jobs
+      .filter((job) => {
+        const startedAt = job.startedAt ?? job.updatedAt;
+        return job.status === "running" && Date.parse(startedAt) <= staleBeforeMs;
+      })
+      .sort((left, right) => Date.parse(left.startedAt ?? left.updatedAt) - Date.parse(right.startedAt ?? right.updatedAt) || left.id - right.id)
+      .slice(0, input.limit);
+
+    for (const job of stale) {
+      const startedAt = job.startedAt ?? job.updatedAt;
+      const startedMs = Date.parse(startedAt);
+      job.status = "failed";
+      job.updatedAt = input.now;
+      job.finishedAt = input.now;
+      job.lastError = JSON.stringify({
+        code: "internal_error",
+        message: "Docs refresh job exceeded running timeout.",
+        details: {
+          jobId: job.id,
+          sourceId: job.sourceId,
+          jobType: job.jobType,
+          attemptCount: job.attemptCount,
+          startedAt,
+          timeoutSeconds: input.timeoutSeconds,
+          ageSeconds: Math.max(0, Math.floor((nowMs - startedMs) / 1000))
+        }
+      });
+    }
+
+    return stale;
   }
 
   async getLatestRefreshJob(input: {
@@ -138,13 +193,20 @@ class FakeExecutor implements DocsRefreshJobExecutor {
   maxActive = 0;
   private active = 0;
 
-  constructor(private readonly failJobTypes = new Set<RefreshJobType>()) {}
+  constructor(
+    private readonly failJobTypes = new Set<RefreshJobType>(),
+    private readonly throwJobTypes = new Set<RefreshJobType>()
+  ) {}
 
   private async run(jobType: RefreshJobType): Promise<{ ok: true } | { ok: false; error: ReturnType<typeof createStructuredError> }> {
     this.active += 1;
     this.maxActive = Math.max(this.maxActive, this.active);
     await new Promise((resolve) => setTimeout(resolve, 1));
     this.active -= 1;
+
+    if (this.throwJobTypes.has(jobType)) {
+      throw new Error(`Unexpected refresh failure with Authorization: Bearer secret-token and full page content for ${jobType}.`);
+    }
 
     if (this.failJobTypes.has(jobType)) {
       return {
@@ -180,13 +242,20 @@ class FakeExecutor implements DocsRefreshJobExecutor {
 function createWorker(options: {
   store?: InMemoryWorkerStore;
   executor?: FakeExecutor;
+  sourceRegistry?: DocsSourceRegistry;
+  logger?: {
+    readonly info: (message: string) => void;
+    readonly error: (message: string) => void;
+  };
   maxJobsPerRun?: number;
   maxConcurrency?: number;
+  runningJobTimeoutSeconds?: number;
 } = {}) {
   const store = options.store ?? new InMemoryWorkerStore();
+  const sourceRegistry = options.sourceRegistry ?? defaultDocsSourceRegistry;
   const queue = new RefreshJobQueue({
     store,
-    sourceRegistry: defaultDocsSourceRegistry,
+    sourceRegistry,
     now: () => now,
     maxPendingJobs: 50,
     maxPendingJobsPerSource: 50
@@ -200,14 +269,74 @@ function createWorker(options: {
       store,
       queue,
       executor,
-      sourceRegistry: defaultDocsSourceRegistry,
+      sourceRegistry,
       now: () => now,
       refreshIntervalSeconds: 7 * 24 * 60 * 60,
       maxJobsPerRun: options.maxJobsPerRun ?? 10,
       maxPagesPerRun: 500,
       maxEmbeddingsPerRun: 2000,
-      maxConcurrency: options.maxConcurrency ?? 4
+      maxConcurrency: options.maxConcurrency ?? 4,
+      runningJobTimeoutSeconds: options.runningJobTimeoutSeconds ?? 1800,
+      ...(options.logger === undefined ? {} : { logger: options.logger })
     })
+  };
+}
+
+function createTestSourcePack(sourceId: string): DocsSourcePack {
+  return {
+    sourceId,
+    displayName: `${sourceId} docs`,
+    enabled: true,
+    allowedHosts: [`${sourceId}.example.com`],
+    indexUrls: [`https://${sourceId}.example.com/docs/index.txt`],
+    allowedUrlPatterns: [`https://${sourceId}.example.com/docs/*`],
+    chunking: {
+      targetTokens: 900,
+      overlapTokens: 120
+    },
+    refreshPolicy: {
+      defaultTtlSeconds: 604800
+    },
+    checkUrl: (input) => ({
+      allowed: true,
+      sourceId,
+      url: new URL(String(input)),
+      urlKind: "page"
+    })
+  };
+}
+
+function parseLastError(job: MutableWorkerJob | undefined): {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+} {
+  if (job?.lastError === undefined || job.lastError === null) {
+    throw new Error("Expected job last_error.");
+  }
+
+  return JSON.parse(job.lastError) as {
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+  };
+}
+
+function captureLogger(): {
+  readonly logs: Array<{ readonly level: "info" | "error"; readonly message: string }>;
+  readonly logger: {
+    readonly info: (message: string) => void;
+    readonly error: (message: string) => void;
+  };
+} {
+  const logs: Array<{ readonly level: "info" | "error"; readonly message: string }> = [];
+
+  return {
+    logs,
+    logger: {
+      info: (message) => logs.push({ level: "info", message }),
+      error: (message) => logs.push({ level: "error", message })
+    }
   };
 }
 
@@ -272,6 +401,191 @@ describe("docs refresh worker", () => {
     expect(result.failed).toBe(1);
     expect(failed?.status).toBe("failed");
     expect(failed?.lastError).toContain("fetch_failed");
+  });
+
+  test("worker marks thrown execution error failed with sanitized structured last_error", async () => {
+    const executor = new FakeExecutor(new Set(), new Set(["page"]));
+    const { store, worker } = createWorker({ executor });
+    const job = store.seed({ url: pageUrl, jobType: "page", reason: "missing_content" });
+
+    const result = await worker.runOnce();
+    const failed = store.jobs.find((item) => item.id === job.id);
+    const lastError = parseLastError(failed);
+
+    expect(result.processed).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(failed?.status).toBe("failed");
+    expect(lastError).toEqual({
+      code: "internal_error",
+      message: "Docs refresh job failed unexpectedly.",
+      details: {
+        jobId: job.id,
+        sourceId: "bun",
+        jobType: "page",
+        causeName: "Error",
+        causeMessage: "Unexpected refresh failure with [redacted authorization] and [redacted content] for page."
+      }
+    });
+    expect(failed?.lastError).not.toContain("secret-token");
+    expect(failed?.lastError).not.toContain("Authorization");
+    expect(failed?.lastError).not.toContain("full page content");
+    expect(failed?.lastError).not.toContain("Error:");
+  });
+
+  test("worker logs sanitized job failure details", async () => {
+    const captured = captureLogger();
+    const executor = new FakeExecutor(new Set(), new Set(["page"]));
+    const { store, worker } = createWorker({ executor, logger: captured.logger });
+    const job = store.seed({ url: pageUrl, jobType: "page", reason: "missing_content" });
+
+    await worker.runOnce();
+
+    expect(captured.logs).toContainEqual({
+      level: "error",
+      message:
+        `bun-dev-intel-mcp docs worker job failed id=${job.id} source=bun type=page status=failed ` +
+        `code=internal_error message="Docs refresh job failed unexpectedly." causeName=Error ` +
+        `causeMessage="Unexpected refresh failure with [redacted authorization] and [redacted content] for page."`
+    });
+
+    const serialized = JSON.stringify(captured.logs);
+    expect(serialized).not.toContain("secret-token");
+    expect(serialized).not.toContain("Authorization");
+    expect(serialized).not.toContain("full page content");
+    expect(serialized).not.toContain("Error:");
+  });
+
+  test("worker continues after one claimed job throws", async () => {
+    const executor = new FakeExecutor(new Set(), new Set(["page"]));
+    const { store, worker } = createWorker({ executor, maxJobsPerRun: 2, maxConcurrency: 1 });
+    const failedJob = store.seed({ url: "https://bun.com/docs/runtime/http-server", jobType: "page" });
+    const succeededJob = store.seed({ url: "https://bun.com/docs/runtime/typescript", jobType: "embedding" });
+
+    const result = await worker.runOnce();
+
+    expect(result.processed).toBe(2);
+    expect(result.failed).toBe(1);
+    expect(result.succeeded).toBe(1);
+    expect(store.jobs.find((job) => job.id === failedJob.id)?.status).toBe("failed");
+    expect(store.jobs.find((job) => job.id === succeededJob.id)?.status).toBe("succeeded");
+    expect(executor.embeddingCalls).toEqual(["bun:https://bun.com/docs/runtime/typescript"]);
+  });
+
+  test("worker recovers stale running jobs before claiming queued jobs", async () => {
+    const { store, worker } = createWorker({ maxJobsPerRun: 2, runningJobTimeoutSeconds: 1800 });
+    store.seed({
+      jobType: "source_index",
+      reason: "scheduled",
+      status: "succeeded",
+      createdAt: "2026-05-13T00:00:00.000Z"
+    });
+    const stale = store.seed({
+      url: "https://bun.com/docs/runtime/http-server",
+      jobType: "page",
+      status: "running",
+      createdAt: "2026-05-14T11:00:00.000Z",
+      startedAt: "2026-05-14T11:00:00.000Z",
+      attemptCount: 2
+    });
+    const queued = store.seed({ url: "https://bun.com/docs/runtime/typescript", jobType: "embedding" });
+
+    const result = await worker.runCycle();
+    const recovered = store.jobs.find((job) => job.id === stale.id);
+    const lastError = parseLastError(recovered);
+
+    expect(result.recovered).toEqual({ staleRunningFailed: 1 });
+    expect(result.processed).toBe(1);
+    expect(result.succeeded).toBe(1);
+    expect(recovered?.status).toBe("failed");
+    expect(store.jobs.find((job) => job.id === queued.id)?.status).toBe("succeeded");
+    expect(lastError.details).toMatchObject({
+      jobId: stale.id,
+      sourceId: "bun",
+      jobType: "page",
+      attemptCount: 2,
+      startedAt: "2026-05-14T11:00:00.000Z",
+      timeoutSeconds: 1800,
+      ageSeconds: 3600
+    });
+  });
+
+  test("worker logs stale running job recovery count", async () => {
+    const captured = captureLogger();
+    const { store, worker } = createWorker({ logger: captured.logger, runningJobTimeoutSeconds: 1800 });
+    store.seed({
+      url: "https://bun.com/docs/runtime/http-server",
+      jobType: "page",
+      status: "running",
+      createdAt: "2026-05-14T11:00:00.000Z",
+      startedAt: "2026-05-14T11:00:00.000Z",
+      attemptCount: 2
+    });
+
+    await worker.runOnce();
+
+    expect(captured.logs).toContainEqual({
+      level: "info",
+      message: "bun-dev-intel-mcp docs worker recovered stale running jobs count=1"
+    });
+  });
+
+  test("worker does not recover fresh running jobs", async () => {
+    const { store, worker } = createWorker({ runningJobTimeoutSeconds: 1800 });
+    store.seed({
+      jobType: "source_index",
+      reason: "scheduled",
+      status: "succeeded",
+      createdAt: "2026-05-13T00:00:00.000Z"
+    });
+    const fresh = store.seed({
+      url: "https://bun.com/docs/runtime/http-server",
+      jobType: "page",
+      status: "running",
+      createdAt: "2026-05-14T11:45:00.000Z",
+      startedAt: "2026-05-14T11:45:00.000Z",
+      attemptCount: 1
+    });
+
+    const result = await worker.runCycle();
+
+    expect(result.recovered).toEqual({ staleRunningFailed: 0 });
+    expect(result.processed).toBe(0);
+    expect(store.jobs.find((job) => job.id === fresh.id)?.status).toBe("running");
+  });
+
+  test("source-level exclusivity skips same-source jobs when source_index is claimed", async () => {
+    const { store, executor, worker } = createWorker({ maxJobsPerRun: 3 });
+    const sourceJob = store.seed({ jobType: "source_index", reason: "scheduled", priority: 100 });
+    const pageJob = store.seed({ url: "https://bun.com/docs/runtime/http-server", jobType: "page", priority: 90 });
+    const embeddingJob = store.seed({ url: "https://bun.com/docs/runtime/typescript", jobType: "embedding", priority: 80 });
+
+    const result = await worker.runOnce();
+
+    expect(result.processed).toBe(1);
+    expect(result.succeeded).toBe(1);
+    expect(executor.sourceIndexCalls).toEqual(["bun"]);
+    expect(executor.pageCalls).toEqual([]);
+    expect(executor.embeddingCalls).toEqual([]);
+    expect(store.jobs.find((job) => job.id === sourceJob.id)?.status).toBe("succeeded");
+    expect(store.jobs.find((job) => job.id === pageJob.id)?.status).toBe("queued");
+    expect(store.jobs.find((job) => job.id === embeddingJob.id)?.status).toBe("queued");
+  });
+
+  test("source-level exclusivity still runs jobs for another source", async () => {
+    const sourceRegistry = createDocsSourceRegistry([bunDocsSourcePack, createTestSourcePack("alt")]);
+    const { store, executor, worker } = createWorker({ sourceRegistry, maxJobsPerRun: 3 });
+    store.seed({ sourceId: "bun", jobType: "source_index", reason: "scheduled", priority: 100 });
+    const bunPageJob = store.seed({ sourceId: "bun", url: "https://bun.com/docs/runtime/http-server", jobType: "page", priority: 90 });
+    const altPageJob = store.seed({ sourceId: "alt", url: "https://alt.example.com/docs/runtime", jobType: "page", priority: 80 });
+
+    const result = await worker.runOnce();
+
+    expect(result.processed).toBe(2);
+    expect(result.succeeded).toBe(2);
+    expect(executor.sourceIndexCalls).toEqual(["bun"]);
+    expect(executor.pageCalls).toEqual(["alt:https://alt.example.com/docs/runtime"]);
+    expect(store.jobs.find((job) => job.id === bunPageJob.id)?.status).toBe("queued");
+    expect(store.jobs.find((job) => job.id === altPageJob.id)?.status).toBe("succeeded");
   });
 
   test("worker respects max jobs per run", async () => {

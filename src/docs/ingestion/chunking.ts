@@ -70,6 +70,10 @@ function headingText(line: string): { level: number; text: string } | null {
   };
 }
 
+function denseHeadingPath(path: readonly (string | undefined)[]): string[] {
+  return path.filter((part): part is string => typeof part === "string" && part.length > 0);
+}
+
 function parseMarkdownBlocks(content: string): MarkdownBlock[] {
   const blocks: MarkdownBlock[] = [];
   const headingPath: string[] = [];
@@ -106,21 +110,21 @@ function parseMarkdownBlocks(content: string): MarkdownBlock[] {
       headingPath[heading.level - 1] = heading.text;
       blocks.push({
         content: line.trim(),
-        headingPath: [...headingPath],
+        headingPath: denseHeadingPath(headingPath),
         isHeading: true
       });
-      currentHeadingPath = [...headingPath];
+      currentHeadingPath = denseHeadingPath(headingPath);
       continue;
     }
 
     if (!inCodeFence && line.trim().length === 0) {
       flushCurrent();
-      currentHeadingPath = [...headingPath];
+      currentHeadingPath = denseHeadingPath(headingPath);
       continue;
     }
 
     if (currentLines.length === 0) {
-      currentHeadingPath = [...headingPath];
+      currentHeadingPath = denseHeadingPath(headingPath);
     }
 
     currentLines.push(line);
@@ -214,6 +218,27 @@ function withNeighborIndexes(chunks: readonly Omit<DocsChunk, "previousChunkInde
   }));
 }
 
+function withUniqueContentHashes(
+  chunks: readonly Omit<DocsChunk, "previousChunkIndex" | "nextChunkIndex">[]
+): Omit<DocsChunk, "previousChunkIndex" | "nextChunkIndex">[] {
+  const counts = new Map<string, number>();
+
+  for (const chunk of chunks) {
+    counts.set(chunk.contentHash, (counts.get(chunk.contentHash) ?? 0) + 1);
+  }
+
+  return chunks.map((chunk) => {
+    if ((counts.get(chunk.contentHash) ?? 0) <= 1) {
+      return chunk;
+    }
+
+    return {
+      ...chunk,
+      contentHash: computeContentHash(`${chunk.content}\n\nchunk-index:${chunk.chunkIndex}`)
+    };
+  });
+}
+
 export function chunkDocsPage(input: ChunkDocsPageInput): ChunkDocsPageResult {
   const normalizedContent = normalizeContent(input.content);
   const targetTokens = Math.max(1, input.chunking.targetTokens);
@@ -247,6 +272,6 @@ export function chunkDocsPage(input: ChunkDocsPageInput): ChunkDocsPageResult {
     title: input.title,
     url: input.url,
     pageContentHash: computeContentHash(normalizedContent),
-    chunks: withNeighborIndexes(chunks)
+    chunks: withNeighborIndexes(withUniqueContentHashes(chunks))
   };
 }

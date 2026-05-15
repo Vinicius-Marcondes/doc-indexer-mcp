@@ -5,7 +5,8 @@ import { RefreshJobQueue } from "./docs/refresh/refresh-queue";
 import {
   BunDocsRefreshJobExecutor,
   DocsRefreshWorker,
-  type DocsRefreshWorkerCycleResult
+  type DocsRefreshWorkerCycleResult,
+  type DocsRefreshWorkerLogger
 } from "./docs/refresh/docs-worker";
 import { BunDocsDiscoveryClient, type DocsSourceFetchLike } from "./docs/sources/bun-docs-discovery";
 import { defaultDocsSourceRegistry } from "./docs/sources/bun-source-pack";
@@ -69,6 +70,7 @@ export function createDocsRefreshWorker(input: {
   readonly config: RemoteDocsConfig;
   readonly sql: SqlClient;
   readonly fetchImpl?: DocsSourceFetchLike;
+  readonly logger?: DocsRefreshWorkerLogger;
 }): DocsRefreshWorker {
   const storage = new RemoteDocsStorage(input.sql);
   const embeddingProvider = createOpenAiEmbeddingProviderFromConfig(input.config.embeddings);
@@ -93,14 +95,21 @@ export function createDocsRefreshWorker(input: {
     queue,
     executor: new BunDocsRefreshJobExecutor({ pipeline }),
     sourceRegistry: defaultDocsSourceRegistry,
+    logger: input.logger ?? stderrDocsWorkerLogger,
     now: () => new Date().toISOString(),
     refreshIntervalSeconds: input.config.refresh.interval.seconds,
     maxJobsPerRun: input.config.refresh.maxPagesPerRun + input.config.refresh.maxEmbeddingsPerRun,
     maxPagesPerRun: input.config.refresh.maxPagesPerRun,
     maxEmbeddingsPerRun: input.config.refresh.maxEmbeddingsPerRun,
-    maxConcurrency: input.config.refresh.maxConcurrency
+    maxConcurrency: input.config.refresh.maxConcurrency,
+    runningJobTimeoutSeconds: input.config.refresh.runningTimeoutSeconds
   });
 }
+
+const stderrDocsWorkerLogger: DocsRefreshWorkerLogger = {
+  info: (message) => process.stderr.write(`${message}\n`),
+  error: (message) => process.stderr.write(`${message}\n`)
+};
 
 export async function runDocsWorkerOnce(options: RunDocsWorkerOnceOptions = {}): Promise<DocsWorkerStartupResult> {
   if (options.worker !== undefined) {
