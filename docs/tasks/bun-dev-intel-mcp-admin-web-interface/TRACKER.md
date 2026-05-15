@@ -40,14 +40,14 @@ Commit message requirement:
 
 ## Current Task
 
-- Task ID: 03
-- Title: Add admin read models and KPI queries
+- Task ID: 04
+- Title: Add admin API routes and contracts
 - Owner: Codex
 - Status: done
 - Started: 2026-05-14
-- Planned validation: `bun test tests/unit/admin/admin-read-models.test.ts tests/integration/admin/admin-read-models-storage.test.ts` pass; `bun run typecheck` pass; `bun run check` pass
-- Commit intent: Commit admin read model types, KPI helpers, Postgres-backed read storage, and tests.
-- Notes: Focused tests pass; `bun run check` pass. Postgres integration cases are gated by `TEST_DATABASE_URL` and skipped locally.
+- Planned validation: `bun test tests/unit/admin/admin-api-contracts.test.ts tests/unit/admin/admin-api-routes.test.ts` pass; `bun run typecheck` pass; `bun run check` pass
+- Commit intent: Commit shared admin API schemas, authenticated route registration, validation helpers, and route tests.
+- Notes: Focused tests pass; `bun run check` pass. Search route delegates through an injected retrieval service.
 
 ## Task Status
 
@@ -57,7 +57,7 @@ Commit message requirement:
 | 01 | Add workspace and admin console scaffold | done | [01](01-workspace-and-admin-console-scaffold.md) |
 | 02 | Add admin auth storage, bootstrap, and sessions | done | [02](02-admin-auth-storage-bootstrap-sessions.md) |
 | 03 | Add admin read models and KPI queries | done | [03](03-admin-read-models-and-kpi-queries.md) |
-| 04 | Add admin API routes and contracts | pending | [04](04-admin-api-routes-and-contracts.md) |
+| 04 | Add admin API routes and contracts | done | [04](04-admin-api-routes-and-contracts.md) |
 | 05 | Build React admin shell, auth flow, and API client | pending | [05](05-react-admin-shell-auth-api-client.md) |
 | 06 | Build overview dashboard and KPI charts | pending | [06](06-overview-dashboard-kpi-charts.md) |
 | 07 | Build sources, pages, chunks, and jobs views | pending | [07](07-sources-pages-chunks-jobs-views.md) |
@@ -79,3 +79,5 @@ Commit message requirement:
 | 2026-05-14 | 02 | done | Added admin auth schema, password/session primitives, Hono auth/role middleware, bootstrap storage, and tests. Focused tests pass; `bun run check` pass. |
 | 2026-05-14 | 03 | in_progress | Started admin read model task with KPI windows, source health, content, job, retrieval, and audit read queries. |
 | 2026-05-14 | 03 | done | Added admin read models, KPI helpers, source/page/chunk/job/retrieval/audit queries, and tests. Focused tests pass; `bun run check` pass. |
+| 2026-05-14 | 04 | in_progress | Started admin API/contracts task with auth, read route, query validation, and search delegation coverage. |
+| 2026-05-14 | 04 | done | Added shared admin API contracts, authenticated Hono routes, route validation, app mounting, and route/contract tests. Focused tests pass; `bun run check` pass. |

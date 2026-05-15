@@ -1,8 +1,10 @@
 import { Hono, type Context } from "hono";
 import { adminHealthResponseSchema, adminServiceName } from "@bun-dev-intel/admin-contracts";
+import { createAdminApiRoutes, type AdminApiOptions } from "./api";
 
 export interface AdminConsoleAppOptions {
   readonly readinessCheck?: () => boolean | Promise<boolean>;
+  readonly adminApi?: AdminApiOptions;
 }
 
 function jsonError(context: Context, status: 503, code: string, message: string): Response {
@@ -22,6 +24,10 @@ function jsonError(context: Context, status: 503, code: string, message: string)
 export function createAdminConsoleApp(options: AdminConsoleAppOptions = {}): Hono {
   const app = new Hono();
   const readinessCheck = options.readinessCheck ?? (() => true);
+
+  if (options.adminApi !== undefined) {
+    app.route("/api/admin", createAdminApiRoutes(options.adminApi));
+  }
 
   app.get("/healthz", (context) =>
     context.json(
