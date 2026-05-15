@@ -26,7 +26,7 @@ afterEach(() => {
 
 describe("remote docs Postgres migrations", () => {
   test("migration files are present and ordered", () => {
-    expect(migrationFiles()).toEqual(["0001_remote_docs_schema.sql"]);
+    expect(migrationFiles()).toEqual(["0001_remote_docs_schema.sql", "0002_admin_auth_schema.sql", "0003_admin_audit_events.sql"]);
   });
 
   test("migration declares pgvector, tables, indexes, and constraints", () => {
@@ -40,7 +40,10 @@ describe("remote docs Postgres migrations", () => {
       "doc_chunks",
       "doc_embeddings",
       "doc_refresh_jobs",
-      "doc_retrieval_events"
+      "doc_retrieval_events",
+      "admin_users",
+      "admin_sessions",
+      "admin_audit_events"
     ]) {
       expect(sql).toContain(`create table if not exists ${table}`);
     }
@@ -59,6 +62,10 @@ describe("remote docs Postgres migrations", () => {
     expect(sql).toContain("embedding vector(1536)");
     expect(sql).toContain("using hnsw (embedding vector_cosine_ops)");
     expect(sql).toContain("doc_retrieval_events_query_hash_idx");
+    expect(sql).toContain("constraint admin_users_role_valid check");
+    expect(sql).toContain("constraint admin_users_normalized_email_key unique");
+    expect(sql).toContain("constraint admin_sessions_token_hash_key unique");
+    expect(sql).toContain("constraint admin_audit_events_event_type_nonempty check");
   });
 
   const testDatabaseUrl = process.env.TEST_DATABASE_URL;
@@ -92,6 +99,9 @@ describe("remote docs Postgres migrations", () => {
 
       expect(extensions.map((row) => row.extname)).toContain("vector");
       expect(tables.map((row) => row.table_name)).toEqual([
+        "admin_audit_events",
+        "admin_sessions",
+        "admin_users",
         "doc_chunks",
         "doc_embeddings",
         "doc_pages",

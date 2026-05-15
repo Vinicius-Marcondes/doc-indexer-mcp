@@ -1,0 +1,28 @@
+{
+  "name": "@bun-dev-intel/admin-console-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@bun-dev-intel/admin-contracts": "workspace:*",
+    "@tanstack/react-query": "5.100.10",
+    "lucide-react": "1.16.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "react-router": "7.15.1",
+    "recharts": "3.8.1"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.1",
+    "vite": "8.0.13",
+    "typescript": "^5.9.3"
+  }
+}

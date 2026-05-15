@@ -4,11 +4,22 @@
   "private": true,
   "type": "module",
   "description": "Source-backed MCP server for Bun project intelligence.",
+  "workspaces": [
+    "apps/admin-console/client",
+    "apps/admin-console/server",
+    "packages/admin-contracts"
+  ],
   "scripts": {
     "test": "bun test",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && bun run admin:contracts:typecheck && bun run admin:server:typecheck && bun run admin:client:typecheck",
     "check": "bun test && bun run typecheck",
-    "dev": "bun --watch src/server.ts"
+    "dev": "bun --watch src/server.ts",
+    "admin:contracts:typecheck": "tsc -p packages/admin-contracts/tsconfig.json --noEmit",
+    "admin:server:typecheck": "tsc -p apps/admin-console/server/tsconfig.json --noEmit",
+    "admin:client:typecheck": "tsc -p apps/admin-console/client/tsconfig.json --noEmit",
+    "admin:client:build": "bun --cwd apps/admin-console/client build",
+    "admin:server:dev": "bun --cwd apps/admin-console/server dev",
+    "admin:client:dev": "bun --cwd apps/admin-console/client dev"
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",

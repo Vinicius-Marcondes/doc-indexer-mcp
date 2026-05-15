@@ -8,6 +8,7 @@ The remote HTTP mode is intentionally docs-only. Keep local stdio for local proj
 
 - `mcp-http-server`: runs `bun src/http.ts` and exposes `/healthz`, `/readyz`, and `/mcp`.
 - `docs-worker`: runs `bun src/docs-worker.ts` and processes scheduled and on-demand refresh jobs outside request handling.
+- `admin-console`: optional profile service that runs `bun apps/admin-console/server/src/index.ts`, serves the built React admin app, and exposes same-origin `/api/admin/*` routes.
 - `postgres-pgvector`: runs the `pgvector/pgvector` Postgres image and stores pages, chunks, embeddings, refresh jobs, and retrieval telemetry.
 
 Remote MCP tools:
@@ -48,6 +49,20 @@ Common optional variables:
 
 `MCP_BEARER_TOKEN`, `OPENAI_API_KEY`, and database passwords must be supplied through environment variables or an env file outside source control. The HTTP service requires bearer auth for `/mcp`; do not expose it without TLS.
 
+Optional admin console variables:
+
+- `ADMIN_HTTP_HOST`
+- `ADMIN_HTTP_PORT`
+- `ADMIN_SESSION_SECRET`
+- `ADMIN_COOKIE_SECURE`
+- `ADMIN_BOOTSTRAP_EMAIL`
+- `ADMIN_BOOTSTRAP_PASSWORD`
+- `ADMIN_SESSION_TTL_SECONDS`
+- `ADMIN_LOGIN_RATE_LIMIT_WINDOW_SECONDS`
+- `ADMIN_LOGIN_RATE_LIMIT_MAX_ATTEMPTS`
+
+`ADMIN_BOOTSTRAP_PASSWORD` must be replaced before the admin profile is started. Keep `ADMIN_COOKIE_SECURE=true` behind HTTPS in deployed environments. The admin console does not use MCP bearer authentication and does not expose `MCP_BEARER_TOKEN` to the frontend bundle; it uses email/password sessions stored in Postgres.
+
 Embedding provider configuration:
 
 - `EMBEDDING_PROVIDER=openai`
@@ -78,6 +93,16 @@ docker compose -f docker-compose.remote-docs.yml --env-file .env.remote-docs up 
 
 The HTTP server listens on `http://localhost:3000` by default. Use `GET /healthz` for liveness and `GET /readyz` for dependency readiness.
 
+Start the optional admin console only when a human operator needs the UI:
+
+```bash
+docker compose -f docker-compose.remote-docs.yml --env-file .env.remote-docs --profile admin up --build
+```
+
+The admin console listens on `http://localhost:3100` by default and should be placed behind the same TLS-capable reverse proxy pattern as the MCP HTTP service. Omit `--profile admin` to run only Postgres, MCP HTTP, and the docs worker.
+
+On startup, `bun apps/admin-console/server/src/index.ts` mounts the Hono admin API under `/api/admin`, serves the built Vite assets, seeds configured source definitions into Postgres, and creates the first admin user only when no admin users exist and `ADMIN_BOOTSTRAP_EMAIL` plus `ADMIN_BOOTSTRAP_PASSWORD` are present. It requires the same `DATABASE_URL` and embedding configuration as remote docs search because the Search Lab calls the same retrieval path as MCP `search_docs`.
+
 Authenticate MCP clients with:
 
 ```text
@@ -100,9 +125,19 @@ docker compose -f docker-compose.remote-docs.yml --env-file .env.remote-docs run
 ```bash
 bun src/http.ts
 bun src/docs-worker.ts
+bun apps/admin-console/server/src/index.ts
 ```
 
-Use the same image for both commands. Keep the worker separate from the HTTP service so refresh, embedding, and tombstone checks do not block MCP requests.
+Use the same base image for all service commands. Keep the worker separate from the HTTP service so refresh, embedding, and tombstone checks do not block MCP requests.
+
+For local admin UI development, run the API server and Vite client separately:
+
+```bash
+bun run admin:server:dev
+bun run admin:client:dev
+```
+
+The Vite client proxies `/api/admin/*` to `http://127.0.0.1:3100`. Container builds use the `admin-console` Docker target, run `bun run admin:client:build`, and serve `apps/admin-console/client/dist` from the Hono server.
 
 ## Refresh Behavior
 

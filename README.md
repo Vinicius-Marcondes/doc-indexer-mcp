@@ -67,6 +67,14 @@ cp .env.remote-docs.example .env.remote-docs
 docker compose -f docker-compose.remote-docs.yml --env-file .env.remote-docs up --build
 ```
 
+Start the optional admin web interface only when an operator needs the browser UI:
+
+```bash
+docker compose -f docker-compose.remote-docs.yml --env-file .env.remote-docs --profile admin up --build
+```
+
+The admin console is a separate Hono service at `http://localhost:3100` by default. It serves the built React 19/Vite app and same-origin `/api/admin/*` routes, uses email/password sessions with `admin` and `viewer` roles, and connects directly to the remote docs Postgres database. The MCP HTTP bearer token is only for `/mcp`, not for the admin browser session.
+
 ### Connect An AI Agent Over HTTP
 
 Configure the agent's MCP client to use Streamable HTTP at the `/mcp` endpoint. The exact config keys vary by agent runtime, but the connection details are:

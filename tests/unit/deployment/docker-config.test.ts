@@ -12,6 +12,17 @@ const requiredEnvNames = [
   "DOCS_REFRESH_INTERVAL",
   "DOCS_REFRESH_RUNNING_TIMEOUT_SECONDS"
 ] as const;
+const adminEnvNames = [
+  "ADMIN_HTTP_HOST",
+  "ADMIN_HTTP_PORT",
+  "ADMIN_SESSION_SECRET",
+  "ADMIN_COOKIE_SECURE",
+  "ADMIN_BOOTSTRAP_EMAIL",
+  "ADMIN_BOOTSTRAP_PASSWORD",
+  "ADMIN_SESSION_TTL_SECONDS",
+  "ADMIN_LOGIN_RATE_LIMIT_WINDOW_SECONDS",
+  "ADMIN_LOGIN_RATE_LIMIT_MAX_ATTEMPTS"
+] as const;
 
 async function readText(path: string): Promise<string> {
   return Bun.file(new URL(path, root)).text();
@@ -39,12 +50,36 @@ describe("remote docs Docker deployment config", () => {
     expect(dockerfile).toContain('CMD ["bun", "src/http.ts"]');
   });
 
+  test("Dockerfile includes an admin console target that builds the React client", async () => {
+    const dockerfile = await readText("Dockerfile");
+
+    expect(dockerfile).toContain("AS admin-console");
+    expect(dockerfile).toContain("bun run admin:client:build");
+    expect(dockerfile).toContain("apps/admin-console/client/dist");
+    expect(dockerfile).toContain("EXPOSE 3100");
+    expect(dockerfile).toContain('CMD ["bun", "apps/admin-console/server/src/index.ts"]');
+  });
+
   test("compose example defines server, worker, and Postgres services", async () => {
     const compose = await readText("docker-compose.remote-docs.yml");
 
     expect(serviceBlock(compose, "mcp-http-server")).toContain("3000:3000");
     expect(serviceBlock(compose, "docs-worker")).toContain("bun src/docs-worker.ts");
     expect(serviceBlock(compose, "postgres-pgvector")).toContain("pgvector/pgvector");
+  });
+
+  test("compose admin console is optional and does not receive the MCP bearer token", async () => {
+    const compose = await readText("docker-compose.remote-docs.yml");
+    const admin = serviceBlock(compose, "admin-console");
+
+    expect(admin).toContain("profiles:");
+    expect(admin).toContain("- admin");
+    expect(admin).toContain("target: admin-console");
+    expect(admin).toContain("3100:3100");
+    expect(admin).toContain("ADMIN_HTTP_HOST: 0.0.0.0");
+    expect(admin).toContain("ADMIN_HTTP_PORT: 3100");
+    expect(admin).toContain("DATABASE_URL:");
+    expect(admin).not.toContain("MCP_BEARER_TOKEN");
   });
 
   test("compose and env example do not contain real-looking secrets", async () => {
@@ -55,6 +90,8 @@ describe("remote docs Docker deployment config", () => {
     expect(combined).not.toMatch(/sk-[A-Za-z0-9_-]{20,}/u);
     expect(combined).not.toMatch(/MCP_BEARER_TOKEN=(?!\$\{|replace-|change-|example-|your-)[^\s#]{16,}/u);
     expect(combined).not.toMatch(/OPENAI_API_KEY=(?!\$\{|replace-|change-|example-|your-)[^\s#]{16,}/u);
+    expect(combined).not.toMatch(/ADMIN_SESSION_SECRET=(?!\$\{|replace-|change-|example-|your-)[^\s#]{16,}/u);
+    expect(combined).not.toMatch(/ADMIN_BOOTSTRAP_PASSWORD=(?!\$\{|replace-|change-|example-|your-)[^\s#]{12,}/u);
   });
 
   test("server and worker commands use separate entrypoints", async () => {
@@ -84,9 +121,16 @@ describe("remote docs Docker deployment config", () => {
       expect(docs).toContain(name);
     }
 
+    for (const name of adminEnvNames) {
+      expect(env).toContain(`${name}=`);
+      expect(docs).toContain(name);
+    }
+
     expect(docs).toContain("TLS");
     expect(docs).toContain("bun src/http.ts");
     expect(docs).toContain("bun src/docs-worker.ts");
+    expect(docs).toContain("bun apps/admin-console/server/src/index.ts");
+    expect(docs).toContain("--profile admin");
     expect(docs).toContain("runRemoteDocsMigrations");
   });
 
