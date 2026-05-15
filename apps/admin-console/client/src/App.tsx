@@ -23,6 +23,14 @@ import {
 import type { AdminUser } from "@bun-dev-intel/admin-contracts";
 import { AdminApiProvider, useAdminSession, useLoginMutation, useLogoutMutation } from "./session";
 import { OverviewPage } from "./overview";
+import {
+  ChunkDetailPage,
+  JobDetailPage,
+  JobsPage,
+  PageDetailPage,
+  SourceDetailPage,
+  SourcesPage
+} from "./resource-views";
 
 export interface LoginFormState {
   readonly email: string;
@@ -109,7 +117,11 @@ function AdminRoutes() {
           <Route index element={<Navigate to="/overview" replace />} />
           <Route path="/overview" element={<OverviewPage />} />
           <Route path="/sources" element={<SourcesPage />} />
+          <Route path="/sources/:sourceId" element={<SourceDetailPage />} />
+          <Route path="/sources/:sourceId/pages/:pageId" element={<PageDetailPage />} />
+          <Route path="/sources/:sourceId/chunks/:chunkId" element={<ChunkDetailPage />} />
           <Route path="/jobs" element={<JobsPage />} />
+          <Route path="/jobs/:jobId" element={<JobDetailPage />} />
           <Route path="/search" element={<SearchLabPage />} />
           <Route path="/audit" element={<AuditPage />} />
         </Route>
@@ -302,22 +314,6 @@ export function ShellChrome(props: {
         {props.children ?? <Outlet />}
       </section>
     </main>
-  );
-}
-
-function SourcesPage() {
-  return (
-    <PageFrame title="Sources">
-      <DataTable columns={["Source", "State", "Pages", "Chunks", "Coverage"]} emptyLabel="No sources loaded" />
-    </PageFrame>
-  );
-}
-
-function JobsPage() {
-  return (
-    <PageFrame title="Jobs">
-      <DataTable columns={["Status", "Type", "Source", "URL", "Updated"]} emptyLabel="No jobs loaded" />
-    </PageFrame>
   );
 }
 

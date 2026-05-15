@@ -1,19 +1,27 @@
 import {
   adminAuthUserResponseSchema,
+  adminChunkResponseSchema,
   adminErrorResponseSchema,
+  adminJobResponseSchema,
   adminKpisResponseSchema,
   adminJobsResponseSchema,
   adminLoginRequestSchema,
   adminLogoutResponseSchema,
   adminOverviewResponseSchema,
+  adminPageResponseSchema,
+  adminPagesResponseSchema,
   adminSearchRequestSchema,
   adminSearchResponseSchema,
+  adminSourceResponseSchema,
   adminSourcesResponseSchema,
+  type AdminChunkDetail,
   type AdminErrorResponse,
   type AdminJobSummary,
   type AdminKpiWindow,
   type AdminLoginRequest,
   type AdminOverviewKpis,
+  type AdminPageDetail,
+  type AdminPageListItem,
   type AdminRetrievalKpis,
   type AdminSearchRequest,
   type AdminSearchResponse,
@@ -50,6 +58,20 @@ export interface AdminJobListOptions {
 
 export interface AdminJobListResult {
   readonly jobs: readonly AdminJobSummary[];
+  readonly nextCursor: number | null;
+}
+
+export interface AdminPageListOptions {
+  readonly sourceId: string;
+  readonly q?: string;
+  readonly freshness?: AdminPageListItem["freshness"];
+  readonly hasEmbedding?: boolean;
+  readonly limit?: number;
+  readonly cursor?: number;
+}
+
+export interface AdminPageListResult {
+  readonly pages: readonly AdminPageListItem[];
   readonly nextCursor: number | null;
 }
 
@@ -110,6 +132,53 @@ export class AdminApiClient {
     return response.sources;
   }
 
+  async getSource(sourceId: string): Promise<AdminSourceHealth> {
+    const response = await this.fetchJson(`/api/admin/sources/${encodeURIComponent(sourceId)}`, adminSourceResponseSchema, {
+      method: "GET"
+    });
+
+    return response.source;
+  }
+
+  async listPages(input: AdminPageListOptions): Promise<AdminPageListResult> {
+    const response = await this.fetchJson(
+      `/api/admin/sources/${encodeURIComponent(input.sourceId)}/pages${formatPageListQuery(input)}`,
+      adminPagesResponseSchema,
+      {
+        method: "GET"
+      }
+    );
+
+    return {
+      pages: response.pages,
+      nextCursor: response.nextCursor
+    };
+  }
+
+  async getPage(sourceId: string, pageId: number): Promise<AdminPageDetail> {
+    const response = await this.fetchJson(
+      `/api/admin/sources/${encodeURIComponent(sourceId)}/pages/${encodeURIComponent(String(pageId))}`,
+      adminPageResponseSchema,
+      {
+        method: "GET"
+      }
+    );
+
+    return response.page;
+  }
+
+  async getChunk(sourceId: string, chunkId: number): Promise<AdminChunkDetail> {
+    const response = await this.fetchJson(
+      `/api/admin/sources/${encodeURIComponent(sourceId)}/chunks/${encodeURIComponent(String(chunkId))}`,
+      adminChunkResponseSchema,
+      {
+        method: "GET"
+      }
+    );
+
+    return response.chunk;
+  }
+
   async listJobs(input: AdminJobListOptions = {}): Promise<AdminJobListResult> {
     const response = await this.fetchJson(`/api/admin/jobs${formatJobListQuery(input)}`, adminJobsResponseSchema, {
       method: "GET"
@@ -119,6 +188,14 @@ export class AdminApiClient {
       jobs: response.jobs,
       nextCursor: response.nextCursor
     };
+  }
+
+  async getJob(jobId: number): Promise<AdminJobSummary> {
+    const response = await this.fetchJson(`/api/admin/jobs/${encodeURIComponent(String(jobId))}`, adminJobResponseSchema, {
+      method: "GET"
+    });
+
+    return response.job;
   }
 
   async search(input: AdminSearchRequest): Promise<AdminSearchResponse> {
@@ -190,7 +267,20 @@ function formatJobListQuery(input: AdminJobListOptions): string {
   return query.length === 0 ? "" : `?${query}`;
 }
 
-function appendQuery(params: URLSearchParams, key: string, value: string | number | undefined): void {
+function formatPageListQuery(input: AdminPageListOptions): string {
+  const params = new URLSearchParams();
+
+  appendQuery(params, "q", input.q);
+  appendQuery(params, "freshness", input.freshness);
+  appendQuery(params, "hasEmbedding", input.hasEmbedding);
+  appendQuery(params, "limit", input.limit);
+  appendQuery(params, "cursor", input.cursor);
+
+  const query = params.toString();
+  return query.length === 0 ? "" : `?${query}`;
+}
+
+function appendQuery(params: URLSearchParams, key: string, value: boolean | string | number | undefined): void {
   if (value !== undefined) {
     params.set(key, String(value));
   }
