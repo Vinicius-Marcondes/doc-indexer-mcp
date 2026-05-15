@@ -40,14 +40,14 @@ Commit message requirement:
 
 ## Current Task
 
-- Task ID: 04
-- Title: Add admin API routes and contracts
-- Owner: Codex
-- Status: done
-- Started: 2026-05-14
-- Planned validation: `bun test tests/unit/admin/admin-api-contracts.test.ts tests/unit/admin/admin-api-routes.test.ts` pass; `bun run typecheck` pass; `bun run check` pass
-- Commit intent: Commit shared admin API schemas, authenticated route registration, validation helpers, and route tests.
-- Notes: Focused tests pass; `bun run check` pass. Search route delegates through an injected retrieval service.
+- Task ID: none
+- Title: none
+- Owner: none
+- Status: idle
+- Started: n/a
+- Planned validation: n/a
+- Commit intent: n/a
+- Notes: Task 05 completed; next task must be started before further implementation.
 
 ## Task Status
 
@@ -58,7 +58,7 @@ Commit message requirement:
 | 02 | Add admin auth storage, bootstrap, and sessions | done | [02](02-admin-auth-storage-bootstrap-sessions.md) |
 | 03 | Add admin read models and KPI queries | done | [03](03-admin-read-models-and-kpi-queries.md) |
 | 04 | Add admin API routes and contracts | done | [04](04-admin-api-routes-and-contracts.md) |
-| 05 | Build React admin shell, auth flow, and API client | pending | [05](05-react-admin-shell-auth-api-client.md) |
+| 05 | Build React admin shell, auth flow, and API client | done | [05](05-react-admin-shell-auth-api-client.md) |
 | 06 | Build overview dashboard and KPI charts | pending | [06](06-overview-dashboard-kpi-charts.md) |
 | 07 | Build sources, pages, chunks, and jobs views | pending | [07](07-sources-pages-chunks-jobs-views.md) |
 | 08 | Build Search Lab and result diagnostics | pending | [08](08-search-lab-result-diagnostics.md) |
@@ -81,3 +81,5 @@ Commit message requirement:
 | 2026-05-14 | 03 | done | Added admin read models, KPI helpers, source/page/chunk/job/retrieval/audit queries, and tests. Focused tests pass; `bun run check` pass. |
 | 2026-05-14 | 04 | in_progress | Started admin API/contracts task with auth, read route, query validation, and search delegation coverage. |
 | 2026-05-14 | 04 | done | Added shared admin API contracts, authenticated Hono routes, route validation, app mounting, and route/contract tests. Focused tests pass; `bun run check` pass. |
+| 2026-05-14 | 05 | in_progress | Started React admin shell task with API client, session bootstrap, login/logout flow, route guard, and compact visual system. |
+| 2026-05-15 | 05 | done | Added React admin shell, login/session flow, route guard, API client, base visual system, and frontend tests. `bun test apps/admin-console/client/src/App.test.ts` pass; `bun run admin:client:build` pass; `bun run check` pass (471 pass, 23 skipped). |
