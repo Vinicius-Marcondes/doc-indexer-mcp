@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api/admin": "http://localhost:3100"
+      "/api/admin": "http://127.0.0.1:3100"
     }
   }
 });

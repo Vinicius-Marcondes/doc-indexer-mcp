@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: n/a
 - Planned validation: n/a
 - Commit intent: n/a
-- Notes: Task 05 completed; next task must be started before further implementation.
+- Notes: Task 06 completed; next task must be started before further implementation.
 
 ## Task Status
 
@@ -59,7 +59,7 @@ Commit message requirement:
 | 03 | Add admin read models and KPI queries | done | [03](03-admin-read-models-and-kpi-queries.md) |
 | 04 | Add admin API routes and contracts | done | [04](04-admin-api-routes-and-contracts.md) |
 | 05 | Build React admin shell, auth flow, and API client | done | [05](05-react-admin-shell-auth-api-client.md) |
-| 06 | Build overview dashboard and KPI charts | pending | [06](06-overview-dashboard-kpi-charts.md) |
+| 06 | Build overview dashboard and KPI charts | done | [06](06-overview-dashboard-kpi-charts.md) |
 | 07 | Build sources, pages, chunks, and jobs views | pending | [07](07-sources-pages-chunks-jobs-views.md) |
 | 08 | Build Search Lab and result diagnostics | pending | [08](08-search-lab-result-diagnostics.md) |
 | 09 | Add guarded admin actions and audit events | pending | [09](09-guarded-admin-actions-audit-events.md) |
@@ -83,3 +83,5 @@ Commit message requirement:
 | 2026-05-14 | 04 | done | Added shared admin API contracts, authenticated Hono routes, route validation, app mounting, and route/contract tests. Focused tests pass; `bun run check` pass. |
 | 2026-05-14 | 05 | in_progress | Started React admin shell task with API client, session bootstrap, login/logout flow, route guard, and compact visual system. |
 | 2026-05-15 | 05 | done | Added React admin shell, login/session flow, route guard, API client, base visual system, and frontend tests. `bun test apps/admin-console/client/src/App.test.ts` pass; `bun run admin:client:build` pass; `bun run check` pass (471 pass, 23 skipped). |
+| 2026-05-15 | 06 | in_progress | Started overview dashboard task with KPI cards, 1h/24h/7d/30d window state, client-side chart datasets, and empty/unavailable states. |
+| 2026-05-15 | 06 | done | Added overview data fetching, KPI cards, Recharts panels, chart helpers, unavailable/empty/loading states, and dev proxy hardening. Focused frontend tests pass; `bun run admin:client:build` pass with existing Recharts chunk-size warning; `bun run check` pass (476 pass, 23 skipped). |

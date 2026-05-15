@@ -22,6 +22,7 @@ import {
 } from "react-router";
 import type { AdminUser } from "@bun-dev-intel/admin-contracts";
 import { AdminApiProvider, useAdminSession, useLoginMutation, useLogoutMutation } from "./session";
+import { OverviewPage } from "./overview";
 
 export interface LoginFormState {
   readonly email: string;
@@ -301,30 +302,6 @@ export function ShellChrome(props: {
         {props.children ?? <Outlet />}
       </section>
     </main>
-  );
-}
-
-function OverviewPage() {
-  return (
-    <PageFrame title="Overview">
-      <div className="toolbar">
-        <div className="segmented-control" aria-label="KPI window">
-          {["1h", "24h", "7d", "30d"].map((window) => (
-            <button key={window} type="button" className={window === "24h" ? "is-selected" : ""}>
-              {window}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="metric-grid">
-        {["Sources", "Pages", "Chunks", "Embeddings", "Queued jobs", "Failed jobs"].map((label) => (
-          <div className="metric-cell" key={label}>
-            <span>{label}</span>
-            <strong>-</strong>
-          </div>
-        ))}
-      </div>
-    </PageFrame>
   );
 }
 
