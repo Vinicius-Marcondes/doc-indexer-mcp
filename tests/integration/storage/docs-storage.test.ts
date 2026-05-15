@@ -174,6 +174,70 @@ describe("remote docs storage access", () => {
     }
   });
 
+  postgresTest("inserts duplicate chunk batches idempotently for the same page", async () => {
+    const database = await createRemoteDocsTestDatabase();
+
+    if (database === null) {
+      throw new Error("TEST_DATABASE_URL is required for this test.");
+    }
+
+    const storage = new RemoteDocsStorage(database.sql);
+
+    try {
+      await storage.upsertSource({
+        sourceId: "bun",
+        displayName: "Bun docs",
+        allowedUrlPatterns: ["https://bun.com/docs/*"],
+        defaultTtlSeconds: 604800,
+        enabled: true
+      });
+      const page = await storage.upsertPage({
+        sourceId: "bun",
+        url: "https://bun.com/docs/runtime",
+        canonicalUrl: "https://bun.com/docs/runtime",
+        title: "Runtime",
+        content: "Runtime docs",
+        contentHash: "page-hash",
+        httpStatus: 200,
+        fetchedAt: "2026-05-14T12:00:00.000Z",
+        indexedAt: "2026-05-14T12:00:00.000Z"
+      });
+      const chunks = [
+        {
+          url: page.url,
+          title: page.title,
+          headingPath: ["Runtime"],
+          chunkIndex: 0,
+          content: "Bun runtime docs",
+          contentHash: "chunk-0",
+          tokenEstimate: 3
+        },
+        {
+          url: page.url,
+          title: page.title,
+          headingPath: ["Runtime", "APIs"],
+          chunkIndex: 1,
+          content: "Bun API docs",
+          contentHash: "chunk-1",
+          tokenEstimate: 3
+        }
+      ] as const;
+
+      const first = await storage.insertChunks({ sourceId: "bun", pageId: page.id, chunks });
+      const second = await storage.insertChunks({ sourceId: "bun", pageId: page.id, chunks });
+      const rows = await database.sql<{ count: number }[]>`
+        select count(*)::int as count
+        from doc_chunks
+        where page_id = ${page.id}
+      `;
+
+      expect(second.map((chunk) => chunk.id)).toEqual(first.map((chunk) => chunk.id));
+      expect(rows[0]?.count).toBe(2);
+    } finally {
+      await database.cleanup();
+    }
+  });
+
   postgresTest("persists docs entities in an isolated Postgres schema", async () => {
     const database = await createRemoteDocsTestDatabase();
 

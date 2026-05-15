@@ -218,6 +218,27 @@ function withNeighborIndexes(chunks: readonly Omit<DocsChunk, "previousChunkInde
   }));
 }
 
+function withUniqueContentHashes(
+  chunks: readonly Omit<DocsChunk, "previousChunkIndex" | "nextChunkIndex">[]
+): Omit<DocsChunk, "previousChunkIndex" | "nextChunkIndex">[] {
+  const counts = new Map<string, number>();
+
+  for (const chunk of chunks) {
+    counts.set(chunk.contentHash, (counts.get(chunk.contentHash) ?? 0) + 1);
+  }
+
+  return chunks.map((chunk) => {
+    if ((counts.get(chunk.contentHash) ?? 0) <= 1) {
+      return chunk;
+    }
+
+    return {
+      ...chunk,
+      contentHash: computeContentHash(`${chunk.content}\n\nchunk-index:${chunk.chunkIndex}`)
+    };
+  });
+}
+
 export function chunkDocsPage(input: ChunkDocsPageInput): ChunkDocsPageResult {
   const normalizedContent = normalizeContent(input.content);
   const targetTokens = Math.max(1, input.chunking.targetTokens);
@@ -251,6 +272,6 @@ export function chunkDocsPage(input: ChunkDocsPageInput): ChunkDocsPageResult {
     title: input.title,
     url: input.url,
     pageContentHash: computeContentHash(normalizedContent),
-    chunks: withNeighborIndexes(chunks)
+    chunks: withNeighborIndexes(withUniqueContentHashes(chunks))
   };
 }

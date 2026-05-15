@@ -620,6 +620,14 @@ export class RemoteDocsStorage {
             ${chunk.contentHash},
             ${chunk.tokenEstimate}
           )
+          on conflict (source_id, page_id, content_hash) do update set
+            url = excluded.url,
+            title = excluded.title,
+            heading_path = excluded.heading_path,
+            chunk_index = excluded.chunk_index,
+            content = excluded.content,
+            token_estimate = excluded.token_estimate,
+            updated_at = now()
           returning id, source_id, page_id, url, title, heading_path, chunk_index, content, content_hash, token_estimate
         `;
 

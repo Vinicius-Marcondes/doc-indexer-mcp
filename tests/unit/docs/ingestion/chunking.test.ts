@@ -113,6 +113,17 @@ describe("docs chunking", () => {
     expect(second.chunks.map((chunk) => chunk.contentHash)).toEqual(first.chunks.map((chunk) => chunk.contentHash));
   });
 
+  test("keeps repeated chunk content hashes unique within a page", () => {
+    const result = chunkDocsPage({
+      ...baseInput,
+      content: "Repeated docs paragraph.\n\nRepeated docs paragraph.",
+      chunking: { targetTokens: 6, overlapTokens: 0 }
+    });
+
+    expect(result.chunks).toHaveLength(2);
+    expect(new Set(result.chunks.map((chunk) => chunk.contentHash)).size).toBe(result.chunks.length);
+  });
+
   test("different content changes relevant hashes", () => {
     const first = chunkDocsPage({
       ...baseInput,
