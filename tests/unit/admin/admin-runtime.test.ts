@@ -28,6 +28,7 @@ function validEnv(overrides: Record<string, string | undefined> = {}): Record<st
     ADMIN_SESSION_TTL_SECONDS: "3600",
     ADMIN_LOGIN_RATE_LIMIT_WINDOW_SECONDS: "900",
     ADMIN_LOGIN_RATE_LIMIT_MAX_ATTEMPTS: "10",
+    ADMIN_AUTH_LOG_LEVEL: "INFO",
     DOCS_SEARCH_DEFAULT_LIMIT: "5",
     DOCS_SEARCH_MAX_LIMIT: "20",
     DOCS_REFRESH_MAX_PAGES_PER_RUN: "500",
@@ -116,6 +117,19 @@ describe("admin runtime", () => {
       expect(result.config.database.url).toBe("postgres://docs:docs-password@localhost:5432/docs");
       expect(result.config.embeddings.model).toBe("text-embedding-3-small");
       expect(result.config.auth.secureCookies).toBe(false);
+      expect(result.config.auth.logLevel).toBe("INFO");
+    }
+  });
+
+  test("admin runtime config validates auth log level", () => {
+    const result = parseAdminRuntimeConfig(validEnv({ ADMIN_AUTH_LOG_LEVEL: "VERBOSE" }));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.issues).toContainEqual({
+        path: "ADMIN_AUTH_LOG_LEVEL",
+        message: "ADMIN_AUTH_LOG_LEVEL must be NONE, INFO, DEBUG, or TRACE."
+      });
     }
   });
 
@@ -131,7 +145,7 @@ describe("admin runtime", () => {
 
   test("runtime app mounts the admin API for the standalone server", async () => {
     const result = await createAdminRuntimeApp({
-      env: validEnv(),
+      env: validEnv({ ADMIN_AUTH_LOG_LEVEL: "NONE" }),
       sql: fakeSql(),
       now: () => now,
       bootstrap: false,

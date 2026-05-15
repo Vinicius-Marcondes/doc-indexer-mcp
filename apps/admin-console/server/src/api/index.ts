@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { getCookie } from "hono/cookie";
 import {
@@ -46,6 +47,7 @@ import {
   type AdminAuthUser,
   type AdminPrincipal
 } from "../auth";
+import { noopAdminAuthLogger, type AdminAuthLogger } from "../auth/logging";
 import type {
   AdminAuditEventsResult,
   AdminChunkDetail,
@@ -103,6 +105,7 @@ export interface AdminApiOptions {
   readonly sessionTtlSeconds?: number;
   readonly secureCookies?: boolean;
   readonly loginRateLimiter?: LoginRateLimiter;
+  readonly authLogger?: AdminAuthLogger;
 }
 
 type AdminApiEnv = {
@@ -150,6 +153,122 @@ function normalizedLoginEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+function hashLogValue(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 16);
+}
+
+function maskedEmail(email: string): string {
+  const normalized = normalizedLoginEmail(email);
+  const [local = "", domain = ""] = normalized.split("@");
+
+  if (local.length === 0 || domain.length === 0) {
+    return normalized.length === 0 ? "[empty]" : "[invalid-email]";
+  }
+
+  return `${local[0]}***@${domain}`;
+}
+
+function loginIdentityFields(email: string): Record<string, unknown> {
+  const normalized = normalizedLoginEmail(email);
+  const domain = normalized.includes("@") ? normalized.split("@").at(-1) : null;
+
+  return {
+    emailPresent: normalized.length > 0,
+    emailMasked: maskedEmail(email),
+    emailHash: hashLogValue(normalized),
+    emailDomain: domain
+  };
+}
+
+function requestId(context: Context): string {
+  const headerValue = context.req.header("x-request-id")?.trim();
+  return headerValue === undefined || headerValue.length === 0 ? randomUUID() : headerValue.slice(0, 128);
+}
+
+function requestLogFields(context: Context, id: string): Record<string, unknown> {
+  return {
+    requestId: id,
+    method: context.req.method,
+    path: new URL(context.req.url).pathname,
+    ip: requestIp(context),
+    userAgent: context.req.header("user-agent") ?? null
+  };
+}
+
+function setRequestIdHeader(context: Context, id: string): void {
+  context.header("x-request-id", id);
+}
+
+function safeRequestHeaders(context: Context): Record<string, unknown> {
+  return {
+    contentType: context.req.header("content-type") ?? null,
+    contentLength: context.req.header("content-length") ?? null,
+    origin: context.req.header("origin") ?? null,
+    referer: context.req.header("referer") ?? null,
+    xForwardedForPresent: context.req.header("x-forwarded-for") !== undefined,
+    xRequestIdPresent: context.req.header("x-request-id") !== undefined,
+    cookiePresent: context.req.header("cookie") !== undefined,
+    authorizationPresent: context.req.header("authorization") !== undefined
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function loginBodySummary(rawBody: unknown): Record<string, unknown> {
+  if (!isRecord(rawBody)) {
+    return {
+      bodyType: rawBody === null ? "null" : Array.isArray(rawBody) ? "array" : typeof rawBody
+    };
+  }
+
+  const keys = Object.keys(rawBody);
+  const email = typeof rawBody.email === "string" ? rawBody.email : "";
+  const password = rawBody.password;
+
+  return {
+    bodyType: "object",
+    keys,
+    ...loginIdentityFields(email),
+    passwordPresent: typeof password === "string" && password.length > 0,
+    passwordType: password === null ? "null" : typeof password,
+    unexpectedKeys: keys.filter((key) => key !== "email" && key !== "password")
+  };
+}
+
+function validationIssueSummary(parsed: ReturnType<typeof adminLoginRequestSchema.safeParse>): readonly Record<string, unknown>[] {
+  if (parsed.success) {
+    return [];
+  }
+
+  return parsed.error.issues.map((issue) => ({
+    path: issue.path.join("."),
+    code: issue.code,
+    message: issue.message
+  }));
+}
+
+function loginFailureReason(input: { readonly user: AdminAuthUser | null; readonly validPassword: boolean }): "user_not_found" | "user_disabled" | "invalid_password" {
+  if (input.user === null) {
+    return "user_not_found";
+  }
+
+  if (input.user.disabledAt !== null) {
+    return "user_disabled";
+  }
+
+  if (!input.validPassword) {
+    return "invalid_password";
+  }
+
+  return "invalid_password";
+}
+
+function durationMs(startedAtMs: number): number {
+  return Date.now() - startedAtMs;
+}
+
 async function recordAuthAudit(
   options: AdminApiOptions,
   input: {
@@ -160,9 +279,9 @@ async function recordAuthAudit(
     readonly context: Context;
     readonly now: string;
   }
-): Promise<void> {
+): Promise<"written" | "skipped"> {
   if (options.auditStore === undefined) {
-    return;
+    return "skipped";
   }
 
   await options.auditStore.createAuditEvent({
@@ -178,6 +297,7 @@ async function recordAuthAudit(
       userAgent: input.context.req.header("user-agent") ?? null
     }
   });
+  return "written";
 }
 
 async function parseJsonBody(context: Context): Promise<unknown | null> {
@@ -312,20 +432,67 @@ export function createAdminApiRoutes(options: AdminApiOptions): Hono<AdminApiEnv
   const app = new Hono<AdminApiEnv>();
   const sessionTtlSeconds = options.sessionTtlSeconds ?? 8 * 60 * 60;
   const secureCookies = options.secureCookies ?? false;
+  const authLogger = options.authLogger ?? noopAdminAuthLogger;
 
   app.post("/auth/login", async (context) => {
+    const id = requestId(context);
+    const fields = requestLogFields(context, id);
+    const startedAtMs = Date.now();
+    setRequestIdHeader(context, id);
+
+    authLogger.info("login.request.received", {
+      ...fields
+    });
+    authLogger.trace("login.request.headers", {
+      ...fields,
+      headers: safeRequestHeaders(context)
+    });
+
     const rawBody = await parseJsonBody(context);
+    authLogger.trace("login.request.body_parsed", {
+      ...fields,
+      body: loginBodySummary(rawBody)
+    });
+
     const parsed = adminLoginRequestSchema.safeParse(rawBody);
 
     if (!parsed.success) {
+      authLogger.info("login.request.rejected", {
+        ...fields,
+        status: 400,
+        reason: "invalid_payload",
+        durationMs: durationMs(startedAtMs)
+      });
+      authLogger.debug("login.validation.failed", {
+        ...fields,
+        issues: validationIssueSummary(parsed)
+      });
       return validationError(context);
     }
 
+    authLogger.debug("login.input.validated", {
+      ...fields,
+      ...loginIdentityFields(parsed.data.email),
+      passwordPresent: parsed.data.password.length > 0
+    });
+
     const limiterKey = loginRateLimitKey(context, parsed.data.email);
     const attemptedAt = options.now();
+    const limiterKeyHash = hashLogValue(limiterKey);
+    const limited = options.loginRateLimiter?.isLimited(limiterKey) === true;
 
-    if (options.loginRateLimiter?.isLimited(limiterKey) === true) {
-      await recordAuthAudit(options, {
+    authLogger.trace("login.rate_limit.key_derived", {
+      ...fields,
+      limiterKeyHash
+    });
+    authLogger.debug("login.rate_limit.checked", {
+      ...fields,
+      limiterKeyHash,
+      limited
+    });
+
+    if (limited) {
+      const auditStatus = await recordAuthAudit(options, {
         actorUserId: null,
         email: parsed.data.email,
         eventType: "admin.auth.login_rate_limited",
@@ -333,15 +500,47 @@ export function createAdminApiRoutes(options: AdminApiOptions): Hono<AdminApiEnv
         context,
         now: attemptedAt
       });
+      authLogger.info("login.rate_limited", {
+        ...fields,
+        ...loginIdentityFields(parsed.data.email),
+        status: 429,
+        auditStatus,
+        durationMs: durationMs(startedAtMs)
+      });
       return jsonError(context, 429, "rate_limited", "Too many login attempts.");
     }
 
+    authLogger.debug("login.user_lookup.started", {
+      ...fields,
+      ...loginIdentityFields(parsed.data.email)
+    });
     const user = await options.authStore.getUserByEmail(parsed.data.email);
+    authLogger.debug("login.user_lookup.completed", {
+      ...fields,
+      userFound: user !== null,
+      userId: user?.id ?? null,
+      role: user?.role ?? null,
+      disabled: user?.disabledAt !== null && user?.disabledAt !== undefined
+    });
+
+    authLogger.trace("login.password_verification.started", {
+      ...fields,
+      userFound: user !== null
+    });
     const validPassword = user === null ? false : await verifyAdminPassword(parsed.data.password, user.passwordHash);
+    authLogger.debug("login.password_verification.completed", {
+      ...fields,
+      userFound: user !== null,
+      validPassword
+    });
 
     if (user === null || user.disabledAt !== null || !validPassword) {
       options.loginRateLimiter?.recordFailure(limiterKey);
-      await recordAuthAudit(options, {
+      authLogger.debug("login.rate_limit.failure_recorded", {
+        ...fields,
+        limiterKeyHash
+      });
+      const auditStatus = await recordAuthAudit(options, {
         actorUserId: user?.id ?? null,
         email: parsed.data.email,
         eventType: "admin.auth.login_failed",
@@ -349,10 +548,31 @@ export function createAdminApiRoutes(options: AdminApiOptions): Hono<AdminApiEnv
         context,
         now: attemptedAt
       });
+      authLogger.info("login.failed", {
+        ...fields,
+        ...loginIdentityFields(parsed.data.email),
+        status: 401,
+        reason: loginFailureReason({ user, validPassword }),
+        userId: user?.id ?? null,
+        role: user?.role ?? null,
+        auditStatus,
+        durationMs: durationMs(startedAtMs)
+      });
       return jsonError(context, 401, "invalid_credentials", "Invalid email or password.");
     }
 
     options.loginRateLimiter?.clear(limiterKey);
+    authLogger.debug("login.rate_limit.cleared", {
+      ...fields,
+      limiterKeyHash,
+      userId: user.id
+    });
+    authLogger.trace("login.session.creation_started", {
+      ...fields,
+      userId: user.id,
+      role: user.role,
+      sessionTtlSeconds
+    });
     const created = await createAdminSession({
       store: options.authStore,
       userId: user.id,
@@ -361,7 +581,15 @@ export function createAdminApiRoutes(options: AdminApiOptions): Hono<AdminApiEnv
       userAgent: context.req.header("user-agent"),
       ip: requestIp(context)
     });
-    await recordAuthAudit(options, {
+    authLogger.debug("login.session.created", {
+      ...fields,
+      userId: user.id,
+      role: user.role,
+      sessionId: created.session.id,
+      expiresAt: created.session.expiresAt,
+      secureCookies
+    });
+    const auditStatus = await recordAuthAudit(options, {
       actorUserId: user.id,
       email: user.email,
       eventType: "admin.auth.login_succeeded",
@@ -369,8 +597,30 @@ export function createAdminApiRoutes(options: AdminApiOptions): Hono<AdminApiEnv
       context,
       now: attemptedAt
     });
+    authLogger.debug("login.audit.recorded", {
+      ...fields,
+      eventType: "admin.auth.login_succeeded",
+      auditStatus,
+      userId: user.id
+    });
 
     context.header("Set-Cookie", createAdminSessionCookie({ token: created.token, expiresAt: created.session.expiresAt, secure: secureCookies }));
+    authLogger.trace("login.cookie.prepared", {
+      ...fields,
+      secureCookies,
+      sameSite: "Lax",
+      httpOnly: true,
+      expiresAt: created.session.expiresAt
+    });
+    authLogger.info("login.succeeded", {
+      ...fields,
+      ...loginIdentityFields(user.email),
+      status: 200,
+      userId: created.session.userId,
+      role: created.session.role,
+      sessionId: created.session.id,
+      durationMs: durationMs(startedAtMs)
+    });
 
     return context.json(
       adminAuthUserResponseSchema.parse({
@@ -384,27 +634,68 @@ export function createAdminApiRoutes(options: AdminApiOptions): Hono<AdminApiEnv
     );
   });
 
-  app.use("*", createAdminAuthMiddleware({ store: options.authStore, now: options.now }));
+  app.use("*", createAdminAuthMiddleware({ store: options.authStore, now: options.now, logger: authLogger }));
 
   app.post("/auth/logout", async (context) => {
+    const id = requestId(context);
+    const fields = requestLogFields(context, id);
+    const startedAtMs = Date.now();
+    const user = context.get("adminUser");
     const token = getCookie(context, adminSessionCookieName);
+    setRequestIdHeader(context, id);
 
+    authLogger.info("logout.request.received", {
+      ...fields,
+      userId: user.id,
+      role: user.role,
+      cookiePresent: token !== undefined
+    });
+
+    let revoked = false;
     if (token !== undefined) {
-      await options.authStore.revokeSession(hashSessionToken(token), options.now());
+      authLogger.trace("logout.session_revoke.started", {
+        ...fields,
+        userId: user.id
+      });
+      revoked = await options.authStore.revokeSession(hashSessionToken(token), options.now());
+      authLogger.debug("logout.session_revoke.completed", {
+        ...fields,
+        userId: user.id,
+        revoked
+      });
     }
 
     context.header("Set-Cookie", createClearAdminSessionCookie({ secure: secureCookies }));
+    authLogger.info("logout.succeeded", {
+      ...fields,
+      userId: user.id,
+      role: user.role,
+      revoked,
+      secureCookies,
+      durationMs: durationMs(startedAtMs)
+    });
     return context.json(adminLogoutResponseSchema.parse({ ok: true }));
   });
 
-  app.get("/auth/me", (context) =>
-    context.json(
+  app.get("/auth/me", (context) => {
+    const id = requestId(context);
+    const fields = requestLogFields(context, id);
+    const user = context.get("adminUser");
+    setRequestIdHeader(context, id);
+
+    authLogger.debug("session_check.me_returned", {
+      ...fields,
+      userId: user.id,
+      role: user.role
+    });
+
+    return context.json(
       adminAuthUserResponseSchema.parse({
         ok: true,
-        user: context.get("adminUser")
+        user
       })
-    )
-  );
+    );
+  });
 
   app.get("/overview", async (context) => {
     const window = parseWindow(context);

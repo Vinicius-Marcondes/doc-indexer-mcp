@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Activity,
@@ -20,8 +20,9 @@ import {
   useLocation,
   useNavigate
 } from "react-router";
-import type { AdminUser } from "@bun-dev-intel/admin-contracts";
+import { adminLoginRequestSchema, type AdminUser } from "@bun-dev-intel/admin-contracts";
 import { AdminApiProvider, useAdminSession, useLoginMutation, useLogoutMutation } from "./session";
+import { AdminApiClientError, AdminApiNetworkError, AdminApiUnexpectedResponseError } from "./api-client";
 import { OverviewPage } from "./overview";
 import {
   ChunkDetailPage,
@@ -67,13 +68,20 @@ export function createAdminQueryClient(): QueryClient {
 
 export function validateLoginForm(input: LoginFormState): LoginFormErrors {
   const errors: LoginFormErrors = {};
+  const parsed = adminLoginRequestSchema.safeParse(input);
 
-  if (!input.email.includes("@")) {
-    errors.email = "Enter a valid email address.";
+  if (parsed.success) {
+    return errors;
   }
 
-  if (input.password.length === 0) {
-    errors.password = "Enter your password.";
+  for (const issue of parsed.error.issues) {
+    if (issue.path[0] === "email") {
+      errors.email = "Enter a valid email address.";
+    }
+
+    if (issue.path[0] === "password") {
+      errors.password = "Enter your password.";
+    }
   }
 
   return errors;
@@ -81,6 +89,54 @@ export function validateLoginForm(input: LoginFormState): LoginFormErrors {
 
 export function hasLoginErrors(errors: LoginFormErrors): boolean {
   return errors.email !== undefined || errors.password !== undefined;
+}
+
+export function readLoginFormData(formData: FormData): LoginFormState {
+  return {
+    email: String(formData.get("email") ?? ""),
+    password: String(formData.get("password") ?? "")
+  };
+}
+
+export function readLoginFormState(form: HTMLFormElement): LoginFormState {
+  return readLoginFormData(new FormData(form));
+}
+
+export function describeLoginError(error: unknown): string | null {
+  if (error === null || error === undefined) {
+    return null;
+  }
+
+  if (error instanceof AdminApiClientError) {
+    return withRequestId(error.response.error.message, error.requestId);
+  }
+
+  if (error instanceof AdminApiNetworkError) {
+    return withRequestId(
+      "Could not reach the admin API. Confirm the admin console page and API are using the same origin.",
+      error.request.requestId
+    );
+  }
+
+  if (error instanceof AdminApiUnexpectedResponseError) {
+    if (error.response.bodyKind === "html") {
+      return withRequestId(
+        "The login endpoint returned HTML instead of admin API JSON. Check that /api/admin/* is routed to the admin API before the frontend fallback.",
+        error.response.requestId
+      );
+    }
+
+    return withRequestId(
+      `The admin API returned an unexpected response (${error.response.status}, ${error.response.reason}).`,
+      error.response.requestId
+    );
+  }
+
+  return "The login request did not reach the admin API.";
+}
+
+function withRequestId(message: string, requestId: string | null): string {
+  return requestId === null ? message : `${message} Request ID: ${requestId}`;
 }
 
 export function resolveProtectedRedirect(user: AdminUser | null | undefined, pathname: string): string | null {
@@ -158,51 +214,62 @@ function LoginRoute() {
   const location = useLocation();
   const session = useAdminSession();
   const login = useLoginMutation();
-  const [form, setForm] = useState<LoginFormState>({ email: "", password: "" });
+  const formRef = useRef<HTMLFormElement>(null);
   const [errors, setErrors] = useState<LoginFormErrors>({});
   const from = new URLSearchParams(location.search).get("from") ?? "/overview";
 
-  if (session.data !== null && session.data !== undefined) {
-    return <Navigate to={from} replace />;
-  }
-
-  function submit(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    const nextErrors = validateLoginForm(form);
+  const submitLoginForm = useCallback((formElement: HTMLFormElement): void => {
+    login.reset();
+    const submittedForm = readLoginFormState(formElement);
+    const nextErrors = validateLoginForm(submittedForm);
     setErrors(nextErrors);
 
     if (hasLoginErrors(nextErrors)) {
       return;
     }
 
-    login.mutate(form, {
+    login.mutate(submittedForm, {
       onSuccess: () => navigate(from, { replace: true })
     });
+  }, [from, login, navigate]);
+
+  useEffect(() => {
+    const formElement = formRef.current;
+
+    if (formElement === null) {
+      return;
+    }
+
+    const activeForm = formElement;
+
+    function submit(event: SubmitEvent): void {
+      event.preventDefault();
+      submitLoginForm(activeForm);
+    }
+
+    activeForm.addEventListener("submit", submit);
+    return () => activeForm.removeEventListener("submit", submit);
+  }, [submitLoginForm]);
+
+  if (session.data !== null && session.data !== undefined) {
+    return <Navigate to={from} replace />;
   }
 
   return (
     <LoginPageView
-      email={form.email}
-      password={form.password}
+      formRef={formRef}
       errors={errors}
-      apiError={login.isError ? "Invalid email or password." : null}
+      apiError={describeLoginError(login.error)}
       isSubmitting={login.isPending}
-      onEmailChange={(email) => setForm((current) => ({ ...current, email }))}
-      onPasswordChange={(password) => setForm((current) => ({ ...current, password }))}
-      onSubmit={submit}
     />
   );
 }
 
 export function LoginPageView(props: {
-  readonly email: string;
-  readonly password: string;
+  readonly formRef?: RefObject<HTMLFormElement | null>;
   readonly errors: LoginFormErrors;
   readonly apiError: string | null;
   readonly isSubmitting: boolean;
-  readonly onEmailChange: (email: string) => void;
-  readonly onPasswordChange: (password: string) => void;
-  readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
     <main className="login-page">
@@ -215,26 +282,24 @@ export function LoginPageView(props: {
           <h1 id="login-title">Docs Admin</h1>
           <p className="login-copy">Sign in with your admin console account.</p>
         </div>
-        <form className="form-stack" onSubmit={props.onSubmit} noValidate>
+        <form ref={props.formRef} className="form-stack" noValidate>
           <label className="field">
             <span>Email</span>
             <input
+              name="email"
               type="email"
               autoComplete="email"
-              value={props.email}
               aria-invalid={props.errors.email === undefined ? "false" : "true"}
-              onChange={(event) => props.onEmailChange(event.target.value)}
             />
             {props.errors.email === undefined ? null : <small>{props.errors.email}</small>}
           </label>
           <label className="field">
             <span>Password</span>
             <input
+              name="password"
               type="password"
               autoComplete="current-password"
-              value={props.password}
               aria-invalid={props.errors.password === undefined ? "false" : "true"}
-              onChange={(event) => props.onPasswordChange(event.target.value)}
             />
             {props.errors.password === undefined ? null : <small>{props.errors.password}</small>}
           </label>

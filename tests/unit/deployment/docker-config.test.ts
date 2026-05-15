@@ -21,7 +21,8 @@ const adminEnvNames = [
   "ADMIN_BOOTSTRAP_PASSWORD",
   "ADMIN_SESSION_TTL_SECONDS",
   "ADMIN_LOGIN_RATE_LIMIT_WINDOW_SECONDS",
-  "ADMIN_LOGIN_RATE_LIMIT_MAX_ATTEMPTS"
+  "ADMIN_LOGIN_RATE_LIMIT_MAX_ATTEMPTS",
+  "ADMIN_AUTH_LOG_LEVEL"
 ] as const;
 
 async function readText(path: string): Promise<string> {
@@ -78,6 +79,8 @@ describe("remote docs Docker deployment config", () => {
     expect(admin).toContain("3100:3100");
     expect(admin).toContain("ADMIN_HTTP_HOST: 0.0.0.0");
     expect(admin).toContain("ADMIN_HTTP_PORT: 3100");
+    expect(admin).toContain("ADMIN_COOKIE_SECURE: ${ADMIN_COOKIE_SECURE:-false}");
+    expect(admin).toContain("ADMIN_AUTH_LOG_LEVEL: ${ADMIN_AUTH_LOG_LEVEL:-INFO}");
     expect(admin).toContain("DATABASE_URL:");
     expect(admin).not.toContain("MCP_BEARER_TOKEN");
   });

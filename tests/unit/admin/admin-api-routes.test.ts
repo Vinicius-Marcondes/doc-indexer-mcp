@@ -21,6 +21,7 @@ import {
   type AdminAuthSession,
   type AdminAuthUser
 } from "../../../apps/admin-console/server/src/auth";
+import type { AdminAuthLogger, AdminAuthLogFields, AdminAuthLogLevel } from "../../../apps/admin-console/server/src/auth/logging";
 import type {
   AdminAuditEventsResult,
   AdminChunkDetail,
@@ -434,7 +435,24 @@ class FakeAuditStore {
   }
 }
 
-async function makeApp() {
+class CapturingAuthLogger implements AdminAuthLogger {
+  readonly level: AdminAuthLogLevel = "TRACE";
+  readonly events: Array<{ level: "INFO" | "DEBUG" | "TRACE"; event: string; fields: AdminAuthLogFields | undefined }> = [];
+
+  info(event: string, fields?: AdminAuthLogFields): void {
+    this.events.push({ level: "INFO", event, fields });
+  }
+
+  debug(event: string, fields?: AdminAuthLogFields): void {
+    this.events.push({ level: "DEBUG", event, fields });
+  }
+
+  trace(event: string, fields?: AdminAuthLogFields): void {
+    this.events.push({ level: "TRACE", event, fields });
+  }
+}
+
+async function makeApp(options: { readonly authLogger?: AdminAuthLogger } = {}) {
   const authStore = new MemoryAuthStore();
   authStore.users.set(1, {
     id: 1,
@@ -463,7 +481,8 @@ async function makeApp() {
     auditStore,
     now: () => now,
     secureCookies: false,
-    sessionTtlSeconds: 3600
+    sessionTtlSeconds: 3600,
+    ...(options.authLogger === undefined ? {} : { authLogger: options.authLogger })
   });
 
   return { app, readModels, searchService, actionService, auditStore };
@@ -535,6 +554,46 @@ describe("admin API routes", () => {
     expect(auditStore.events[1]?.actorUserId).toBe(2);
     expect(serializedAudit).not.toContain("wrong-password");
     expect(serializedAudit).not.toContain("viewer-password");
+  });
+
+  test("auth flow emits structured diagnostic logs without raw secrets", async () => {
+    const authLogger = new CapturingAuthLogger();
+    const { app } = await makeApp({ authLogger });
+    const failedResponse = await app.request("/auth/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": "admin-test",
+        "x-forwarded-for": "203.0.113.10",
+        "x-request-id": "request-1"
+      },
+      body: JSON.stringify({ email: "viewer@example.com", password: "wrong-password" })
+    });
+    const cookie = await loginCookie(app, "viewer@example.com", "viewer-password");
+    const meResponse = await app.request("/auth/me", {
+      headers: {
+        cookie,
+        "x-request-id": "request-2"
+      }
+    });
+    const serializedLogs = JSON.stringify(authLogger.events);
+
+    expect(failedResponse.status).toBe(401);
+    expect(failedResponse.headers.get("x-request-id")).toBe("request-1");
+    expect(meResponse.status).toBe(200);
+    expect(meResponse.headers.get("x-request-id")).toBe("request-2");
+    expect(authLogger.events.map((event) => event.level)).toContain("INFO");
+    expect(authLogger.events.map((event) => event.level)).toContain("DEBUG");
+    expect(authLogger.events.map((event) => event.level)).toContain("TRACE");
+    expect(authLogger.events.map((event) => event.event)).toContain("login.request.received");
+    expect(authLogger.events.map((event) => event.event)).toContain("login.failed");
+    expect(authLogger.events.map((event) => event.event)).toContain("login.succeeded");
+    expect(authLogger.events.map((event) => event.event)).toContain("session_check.succeeded");
+    expect(serializedLogs).toContain("v***@example.com");
+    expect(serializedLogs).toContain("request-1");
+    expect(serializedLogs).not.toContain("wrong-password");
+    expect(serializedLogs).not.toContain("viewer-password");
+    expect(serializedLogs).not.toContain("bun_dev_intel_admin_session=");
   });
 
   test("invalid query parameters return stable validation errors", async () => {

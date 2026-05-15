@@ -23,6 +23,7 @@ import { searchDocs, type SearchDocsRefreshQueue, type SearchDocsRetrieval } fro
 import { AdminActionsService, PostgresAdminActionStore } from "./actions";
 import { createAdminConsoleApp } from "./app";
 import { AdminAuthStorage, bootstrapFirstAdminUser, InMemoryLoginRateLimiter } from "./auth";
+import { createStderrAdminAuthLogger, parseAdminAuthLogLevel, type AdminAuthLogLevel } from "./auth/logging";
 import { AdminReadModelStorage } from "./read-models";
 import type { AdminSearchService } from "./api";
 
@@ -59,6 +60,7 @@ export interface AdminRuntimeConfig {
     readonly secureCookies: boolean;
     readonly loginRateLimitWindowSeconds: number;
     readonly loginRateLimitMaxAttempts: number;
+    readonly logLevel: AdminAuthLogLevel;
   };
   readonly staticAssetsRoot: string;
 }
@@ -279,6 +281,7 @@ export function parseAdminRuntimeConfig(env: Record<string, string | undefined>)
   const loginRateLimitWindowSeconds = parseInteger(env, "ADMIN_LOGIN_RATE_LIMIT_WINDOW_SECONDS", 900, issues, { min: 10, max: 86400 });
   const loginRateLimitMaxAttempts = parseInteger(env, "ADMIN_LOGIN_RATE_LIMIT_MAX_ATTEMPTS", 10, issues, { min: 1, max: 1000 });
   const secureCookies = parseBoolean(env, "ADMIN_COOKIE_SECURE", env.NODE_ENV === "production", issues);
+  const authLogLevel = parseAdminAuthLogLevel(env.ADMIN_AUTH_LOG_LEVEL);
 
   if (embeddingProvider.length > 0 && embeddingProvider !== "openai") {
     issues.push({ path: "EMBEDDING_PROVIDER", message: 'EMBEDDING_PROVIDER must be "openai" for V1.' });
@@ -293,6 +296,10 @@ export function parseAdminRuntimeConfig(env: Record<string, string | undefined>)
 
   if (defaultLimit > maxLimit) {
     issues.push({ path: "DOCS_SEARCH_DEFAULT_LIMIT", message: "DOCS_SEARCH_DEFAULT_LIMIT must be less than or equal to DOCS_SEARCH_MAX_LIMIT." });
+  }
+
+  if (authLogLevel === null) {
+    issues.push({ path: "ADMIN_AUTH_LOG_LEVEL", message: "ADMIN_AUTH_LOG_LEVEL must be NONE, INFO, DEBUG, or TRACE." });
   }
 
   parseDatabaseUrl(databaseUrl, issues);
@@ -337,7 +344,8 @@ export function parseAdminRuntimeConfig(env: Record<string, string | undefined>)
         sessionTtlSeconds,
         secureCookies,
         loginRateLimitWindowSeconds,
-        loginRateLimitMaxAttempts
+        loginRateLimitMaxAttempts,
+        logLevel: authLogLevel ?? "INFO"
       },
       staticAssetsRoot: env.ADMIN_STATIC_ASSETS_DIR?.trim() || "apps/admin-console/client/dist"
     }
@@ -490,6 +498,10 @@ export async function createAdminRuntimeApp(options: CreateAdminRuntimeAppOption
 
   try {
     const services = createAdminRuntimeServices({ config, sql, now, sourceRegistry });
+    const authLogger = createStderrAdminAuthLogger({
+      level: config.auth.logLevel,
+      now
+    });
 
     if (options.seedSources !== false) {
       await seedConfiguredDocsSources(services.docsStorage, sourceRegistry);
@@ -521,7 +533,8 @@ export async function createAdminRuntimeApp(options: CreateAdminRuntimeAppOption
           maxAttempts: config.auth.loginRateLimitMaxAttempts,
           windowSeconds: config.auth.loginRateLimitWindowSeconds,
           now: () => Date.now()
-        })
+        }),
+        authLogger
       },
       readinessCheck: async () => (await databaseReadinessCheck()).ok,
       staticAssetsRoot: config.staticAssetsRoot

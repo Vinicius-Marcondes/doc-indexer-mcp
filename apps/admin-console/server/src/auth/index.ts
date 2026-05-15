@@ -1,6 +1,7 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
+import { noopAdminAuthLogger, type AdminAuthLogger } from "./logging";
 
 export type AdminRole = "admin" | "viewer";
 
@@ -145,6 +146,31 @@ function hashOptionalField(value: string | undefined): string | undefined {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function requestIp(context: Context): string {
+  return context.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+}
+
+function requestId(context: Context): string {
+  const headerValue = context.req.header("x-request-id")?.trim();
+  return headerValue === undefined || headerValue.length === 0 ? randomUUID() : headerValue.slice(0, 128);
+}
+
+function authRequestFields(context: Context, id: string): Record<string, unknown> {
+  const path = new URL(context.req.url).pathname;
+
+  return {
+    requestId: id,
+    method: context.req.method,
+    path,
+    ip: requestIp(context),
+    userAgent: context.req.header("user-agent") ?? null
+  };
+}
+
+function setRequestIdHeader(context: Context, id: string): void {
+  context.header("x-request-id", id);
+}
+
 function jsonError(context: Context, status: 401 | 403, code: string, message: string): Response {
   return context.json(
     {
@@ -237,19 +263,50 @@ export function createClearAdminSessionCookie(input: { readonly secure: boolean 
 export function createAdminAuthMiddleware(input: {
   readonly store: AdminAuthStore;
   readonly now: () => string;
+  readonly logger?: AdminAuthLogger;
 }): MiddlewareHandler<{ Variables: { adminUser: AdminPrincipal } }> {
   return async (context, next) => {
+    const logger = input.logger ?? noopAdminAuthLogger;
+    const id = requestId(context);
+    const fields = authRequestFields(context, id);
     const token = getCookie(context, adminSessionCookieName);
+    setRequestIdHeader(context, id);
+
+    logger.trace("session_check.request.received", {
+      ...fields,
+      cookiePresent: token !== undefined
+    });
 
     if (token === undefined) {
+      logger.info("session_check.failed", {
+        ...fields,
+        status: 401,
+        reason: "missing_session_cookie"
+      });
       return jsonError(context, 401, "unauthorized", "Authentication is required.");
     }
 
+    logger.debug("session_check.lookup.started", {
+      ...fields
+    });
     const session = await input.store.getSessionByTokenHash(hashSessionToken(token), input.now());
 
     if (session === null) {
+      logger.info("session_check.failed", {
+        ...fields,
+        status: 401,
+        reason: "missing_expired_or_revoked_session"
+      });
       return jsonError(context, 401, "unauthorized", "Authentication is required.");
     }
+
+    logger.debug("session_check.succeeded", {
+      ...fields,
+      userId: session.userId,
+      role: session.role,
+      sessionId: session.id,
+      expiresAt: session.expiresAt
+    });
 
     context.set("adminUser", {
       id: session.userId,

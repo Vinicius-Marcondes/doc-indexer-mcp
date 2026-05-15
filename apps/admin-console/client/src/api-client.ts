@@ -34,19 +34,51 @@ import {
 } from "@bun-dev-intel/admin-contracts";
 
 interface ResponseParser<T> {
-  readonly parse: (value: unknown) => T;
+  readonly safeParse: (value: unknown) => { readonly success: true; readonly data: T } | { readonly success: false; readonly error: unknown };
 }
 
 export class AdminApiClientError extends Error {
-  constructor(readonly response: AdminErrorResponse) {
+  constructor(readonly response: AdminErrorResponse, readonly requestId: string | null = null) {
     super(response.error.message);
     this.name = "AdminApiClientError";
+  }
+}
+
+export type AdminApiUnexpectedResponseReason = "invalid_json" | "invalid_error_body" | "schema_mismatch";
+
+export class AdminApiNetworkError extends Error {
+  constructor(
+    readonly request: {
+      readonly path: string;
+      readonly requestId: string;
+      readonly cause: unknown;
+    }
+  ) {
+    super(`Admin API request failed before a response was received: ${request.path}`);
+    this.name = "AdminApiNetworkError";
+  }
+}
+
+export class AdminApiUnexpectedResponseError extends Error {
+  constructor(
+    readonly response: {
+      readonly path: string;
+      readonly status: number;
+      readonly contentType: string | null;
+      readonly bodyKind: "empty" | "json" | "html" | "text";
+      readonly requestId: string | null;
+      readonly reason: AdminApiUnexpectedResponseReason;
+    }
+  ) {
+    super(`Admin API returned an unexpected response for ${response.path}.`);
+    this.name = "AdminApiUnexpectedResponseError";
   }
 }
 
 export interface AdminApiClientOptions {
   readonly baseUrl?: string;
   readonly fetchImpl?: typeof fetch;
+  readonly createRequestId?: () => string;
 }
 
 export interface AdminJobListOptions {
@@ -82,10 +114,12 @@ export interface AdminPageListResult {
 export class AdminApiClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly createRequestId: () => string;
 
   constructor(options: AdminApiClientOptions = {}) {
     this.baseUrl = options.baseUrl ?? "";
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl ?? fetch.bind(globalThis);
+    this.createRequestId = options.createRequestId ?? createRequestId;
   }
 
   async getMe(): Promise<AdminUser | null> {
@@ -247,48 +281,134 @@ export class AdminApiClient {
   }
 
   private async fetchJson<T>(path: string, parser: ResponseParser<T>, init: RequestInit): Promise<T> {
-    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-      ...init,
-      credentials: "include",
-      headers: {
-        accept: "application/json",
-        ...(init.body === undefined ? {} : { "content-type": "application/json" }),
-        ...init.headers
-      }
-    });
-    const body = await readJson(response);
+    const requestId = this.createRequestId();
+    let response: Response;
+
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        ...init,
+        credentials: "include",
+        headers: requestHeaders(init, requestId)
+      });
+    } catch (error) {
+      throw new AdminApiNetworkError({ path, requestId, cause: error });
+    }
+
+    const responseRequestId = response.headers.get("x-request-id") ?? requestId;
+    const parsedBody = await readJsonResponse(response);
 
     if (!response.ok) {
-      const parsedError = adminErrorResponseSchema.safeParse(body);
+      const parsedError = adminErrorResponseSchema.safeParse(parsedBody.body);
 
       if (parsedError.success) {
         if (parsedError.data.error.code === "unauthorized" && path === "/api/admin/auth/me") {
           return { ok: true, user: null } as T;
         }
 
-        throw new AdminApiClientError(parsedError.data);
+        throw new AdminApiClientError(parsedError.data, responseRequestId);
       }
 
-      throw new AdminApiClientError({
-        ok: false,
-        error: {
-          code: "request_failed",
-          message: "Admin API request failed.",
-          status: response.status
-        }
+      throw new AdminApiUnexpectedResponseError({
+        path,
+        status: response.status,
+        contentType: parsedBody.contentType,
+        bodyKind: parsedBody.bodyKind,
+        requestId: responseRequestId,
+        reason: parsedBody.parseFailed ? "invalid_json" : "invalid_error_body"
       });
     }
 
-    return parser.parse(body);
+    if (parsedBody.parseFailed) {
+      throw new AdminApiUnexpectedResponseError({
+        path,
+        status: response.status,
+        contentType: parsedBody.contentType,
+        bodyKind: parsedBody.bodyKind,
+        requestId: responseRequestId,
+        reason: "invalid_json"
+      });
+    }
+
+    const parsedResponse = parser.safeParse(parsedBody.body);
+
+    if (!parsedResponse.success) {
+      throw new AdminApiUnexpectedResponseError({
+        path,
+        status: response.status,
+        contentType: parsedBody.contentType,
+        bodyKind: parsedBody.bodyKind,
+        requestId: responseRequestId,
+        reason: "schema_mismatch"
+      });
+    }
+
+    return parsedResponse.data;
   }
 }
 
-async function readJson(response: Response): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch {
-    return null;
+interface JsonResponseBody {
+  readonly body: unknown;
+  readonly contentType: string | null;
+  readonly bodyKind: "empty" | "json" | "html" | "text";
+  readonly parseFailed: boolean;
+}
+
+async function readJsonResponse(response: Response): Promise<JsonResponseBody> {
+  const contentType = response.headers.get("content-type");
+  const text = await response.text();
+
+  if (text.trim().length === 0) {
+    return {
+      body: null,
+      contentType,
+      bodyKind: "empty",
+      parseFailed: false
+    };
   }
+
+  try {
+    return {
+      body: JSON.parse(text) as unknown,
+      contentType,
+      bodyKind: "json",
+      parseFailed: false
+    };
+  } catch {
+    return {
+      body: null,
+      contentType,
+      bodyKind: text.trimStart().startsWith("<") ? "html" : "text",
+      parseFailed: true
+    };
+  }
+}
+
+function requestHeaders(init: RequestInit, requestId: string): Headers {
+  const headers = new Headers();
+
+  headers.set("accept", "application/json");
+
+  if (init.body !== undefined) {
+    headers.set("content-type", "application/json");
+  }
+
+  new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+
+  if (!headers.has("x-request-id")) {
+    headers.set("x-request-id", requestId);
+  }
+
+  return headers;
+}
+
+function createRequestId(): string {
+  const randomId = globalThis.crypto?.randomUUID?.();
+
+  if (randomId !== undefined && randomId.length > 0) {
+    return randomId;
+  }
+
+  return `admin-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function formatJobListQuery(input: AdminJobListOptions): string {

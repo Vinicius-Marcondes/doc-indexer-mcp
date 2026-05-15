@@ -60,8 +60,11 @@ Optional admin console variables:
 - `ADMIN_SESSION_TTL_SECONDS`
 - `ADMIN_LOGIN_RATE_LIMIT_WINDOW_SECONDS`
 - `ADMIN_LOGIN_RATE_LIMIT_MAX_ATTEMPTS`
+- `ADMIN_AUTH_LOG_LEVEL`
 
 `ADMIN_BOOTSTRAP_PASSWORD` must be replaced before the admin profile is started. Keep `ADMIN_COOKIE_SECURE=true` behind HTTPS in deployed environments. The admin console does not use MCP bearer authentication and does not expose `MCP_BEARER_TOKEN` to the frontend bundle; it uses email/password sessions stored in Postgres.
+
+Set `ADMIN_AUTH_LOG_LEVEL=INFO|DEBUG|TRACE` while diagnosing admin login issues. The auth logger writes structured JSON lines to stderr for container logs and redacts passwords, cookies, and authorization headers. Use `NONE` to disable these diagnostic auth logs.
 
 Embedding provider configuration:
 
