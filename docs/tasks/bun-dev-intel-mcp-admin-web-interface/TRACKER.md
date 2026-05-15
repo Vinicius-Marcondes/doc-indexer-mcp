@@ -47,7 +47,7 @@ Commit message requirement:
 - Started: n/a
 - Planned validation: n/a
 - Commit intent: n/a
-- Notes: Task 09 completed; next task must be started before further implementation.
+- Notes: Task 10 completed; next task must be started before further implementation.
 
 ## Task Status
 
@@ -63,7 +63,7 @@ Commit message requirement:
 | 07 | Build sources, pages, chunks, and jobs views | done | [07](07-sources-pages-chunks-jobs-views.md) |
 | 08 | Build Search Lab and result diagnostics | done | [08](08-search-lab-result-diagnostics.md) |
 | 09 | Add guarded admin actions and audit events | done | [09](09-guarded-admin-actions-audit-events.md) |
-| 10 | Add optional Docker deployment and docs | pending | [10](10-optional-docker-deployment-docs.md) |
+| 10 | Add optional Docker deployment and docs | done | [10](10-optional-docker-deployment-docs.md) |
 | 11 | Final QA, traceability, and handoff | pending | [11](11-final-qa-traceability-handoff.md) |
 
 ## Work Log
@@ -91,3 +91,5 @@ Commit message requirement:
 | 2026-05-15 | 08 | done | Added Search Lab form, admin search mutation, result scoring diagnostics, warnings, citations, page/chunk links, zero-result and low-confidence states. Focused frontend tests pass; `bun run admin:client:build` pass with existing Recharts chunk-size warning; `bun run check` pass (486 pass, 23 skipped). |
 | 2026-05-15 | 09 | in_progress | Started guarded admin actions with backend route coverage and frontend role/confirmation/invalidation tests. |
 | 2026-05-15 | 09 | done | Added action contracts, admin-only mutation routes, action service/storage/audit support, source/job action panels, and migration coverage. Focused tests pass; client build pass with existing Recharts chunk-size warning; browser login smoke pass; `bun run check` pass (496 pass, 23 skipped). |
+| 2026-05-15 | 10 | in_progress | Started optional admin Docker/deployment task with config tests and static asset serving coverage. |
+| 2026-05-15 | 10 | done | Added admin Docker target/profile, static Hono asset serving, admin env examples, and deployment docs. Focused config/static tests pass; admin server typecheck pass; client build pass with existing Recharts chunk-size warning; `bun run check` pass (499 pass, 23 skipped). |

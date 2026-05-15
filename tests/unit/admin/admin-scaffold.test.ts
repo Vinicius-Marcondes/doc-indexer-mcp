@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { createAdminConsoleApp } from "../../../apps/admin-console/server/src/app";
@@ -29,6 +30,33 @@ describe("admin console scaffold", () => {
       status: "ok",
       service: "bun-dev-intel-admin-console"
     });
+  });
+
+  test("admin server serves built client assets with SPA fallback when configured", async () => {
+    const staticRoot = mkdtempSync(resolve(tmpdir(), "admin-console-static-"));
+    mkdirSync(resolve(staticRoot, "assets"));
+    writeFileSync(resolve(staticRoot, "index.html"), "<!doctype html><div id=\"root\">Admin shell</div>");
+    writeFileSync(resolve(staticRoot, "assets", "app.js"), "console.log('admin shell');");
+
+    try {
+      const app = createAdminConsoleApp({ staticAssetsRoot: staticRoot });
+      const indexResponse = await app.request("/");
+      const assetResponse = await app.request("/assets/app.js");
+      const fallbackResponse = await app.request("/sources/bun");
+      const apiMissResponse = await app.request("/api/admin/missing");
+
+      expect(indexResponse.status).toBe(200);
+      expect(indexResponse.headers.get("content-type")).toContain("text/html");
+      expect(await indexResponse.text()).toContain("Admin shell");
+      expect(assetResponse.status).toBe(200);
+      expect(assetResponse.headers.get("content-type")).toContain("text/javascript");
+      expect(await assetResponse.text()).toContain("admin shell");
+      expect(fallbackResponse.status).toBe(200);
+      expect(await fallbackResponse.text()).toContain("Admin shell");
+      expect(apiMissResponse.status).toBe(404);
+    } finally {
+      rmSync(staticRoot, { recursive: true, force: true });
+    }
   });
 
   test("shared contracts package exports a smoke schema", () => {
