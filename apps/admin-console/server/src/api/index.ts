@@ -1,6 +1,8 @@
 import { Hono, type Context } from "hono";
 import { getCookie } from "hono/cookie";
 import {
+  adminActionResponseSchema,
+  adminConfirmedSourceActionRequestSchema,
   adminAuditEventsResponseSchema,
   adminAuthUserResponseSchema,
   adminChunkResponseSchema,
@@ -26,6 +28,7 @@ import {
   type AdminSearchRequest,
   type AdminSearchResponse
 } from "@bun-dev-intel/admin-contracts";
+import { isAdminActionError, type AdminActionService } from "../actions";
 import {
   adminSessionCookieName,
   createAdminAuthMiddleware,
@@ -85,6 +88,7 @@ export interface AdminApiOptions {
   readonly authStore: AdminApiAuthStore;
   readonly readModels: AdminReadModels;
   readonly searchService: AdminSearchService;
+  readonly actionService?: AdminActionService;
   readonly now: () => string;
   readonly sessionTtlSeconds?: number;
   readonly secureCookies?: boolean;
@@ -118,6 +122,10 @@ function validationError(context: Context, message = "Invalid admin API request.
 
 function notFound(context: Context, message: string): Response {
   return jsonError(context, 404, "not_found", message);
+}
+
+function forbidden(context: Context): Response {
+  return jsonError(context, 403, "forbidden", "Admin role is required.");
 }
 
 function requestIp(context: Context): string {
@@ -236,6 +244,26 @@ function parseJobsQuery(context: Context, now: string): AdminJobListFilters | "i
   };
 }
 
+function requireAdminActionService(context: Context, options: AdminApiOptions): AdminActionService | Response {
+  if (context.get("adminUser").role !== "admin") {
+    return forbidden(context);
+  }
+
+  if (options.actionService === undefined) {
+    return jsonError(context, 503, "admin_actions_unavailable", "Admin actions are not configured.");
+  }
+
+  return options.actionService;
+}
+
+function adminActionError(context: Context, error: unknown): Response {
+  if (isAdminActionError(error)) {
+    return jsonError(context, error.status, error.code, error.message);
+  }
+
+  throw error;
+}
+
 export function createAdminApiRoutes(options: AdminApiOptions): Hono<AdminApiEnv> {
   const app = new Hono<AdminApiEnv>();
   const sessionTtlSeconds = options.sessionTtlSeconds ?? 8 * 60 * 60;
@@ -346,6 +374,80 @@ export function createAdminApiRoutes(options: AdminApiOptions): Hono<AdminApiEnv
     return context.json(adminSourceResponseSchema.parse({ ok: true, source }));
   });
 
+  app.post("/sources/:sourceId/actions/refresh", async (context) => {
+    const actionService = requireAdminActionService(context, options);
+
+    if (actionService instanceof Response) {
+      return actionService;
+    }
+
+    try {
+      const action = await actionService.refreshSource({
+        sourceId: context.req.param("sourceId"),
+        actor: context.get("adminUser"),
+        now: options.now()
+      });
+      return context.json(adminActionResponseSchema.parse({ ok: true, action }));
+    } catch (error) {
+      return adminActionError(context, error);
+    }
+  });
+
+  app.post("/sources/:sourceId/actions/tombstone", async (context) => {
+    const actionService = requireAdminActionService(context, options);
+
+    if (actionService instanceof Response) {
+      return actionService;
+    }
+
+    const rawBody = await parseJsonBody(context);
+    const parsed = adminConfirmedSourceActionRequestSchema.safeParse(rawBody);
+
+    if (!parsed.success) {
+      return validationError(context, "Invalid source action request.");
+    }
+
+    try {
+      const action = await actionService.tombstoneSource({
+        sourceId: context.req.param("sourceId"),
+        confirmation: parsed.data.confirmation,
+        ...(parsed.data.reason === undefined ? {} : { reason: parsed.data.reason }),
+        actor: context.get("adminUser"),
+        now: options.now()
+      });
+      return context.json(adminActionResponseSchema.parse({ ok: true, action }));
+    } catch (error) {
+      return adminActionError(context, error);
+    }
+  });
+
+  app.post("/sources/:sourceId/actions/purge-reindex", async (context) => {
+    const actionService = requireAdminActionService(context, options);
+
+    if (actionService instanceof Response) {
+      return actionService;
+    }
+
+    const rawBody = await parseJsonBody(context);
+    const parsed = adminConfirmedSourceActionRequestSchema.safeParse(rawBody);
+
+    if (!parsed.success) {
+      return validationError(context, "Invalid source action request.");
+    }
+
+    try {
+      const action = await actionService.purgeReindexSource({
+        sourceId: context.req.param("sourceId"),
+        confirmation: parsed.data.confirmation,
+        actor: context.get("adminUser"),
+        now: options.now()
+      });
+      return context.json(adminActionResponseSchema.parse({ ok: true, action }));
+    } catch (error) {
+      return adminActionError(context, error);
+    }
+  });
+
   app.get("/sources/:sourceId/pages", async (context) => {
     const query = parsePagesQuery(context, context.req.param("sourceId"), options.now());
 
@@ -414,6 +516,31 @@ export function createAdminApiRoutes(options: AdminApiOptions): Hono<AdminApiEnv
     }
 
     return context.json(adminJobResponseSchema.parse({ ok: true, job }));
+  });
+
+  app.post("/jobs/:jobId/actions/retry", async (context) => {
+    const actionService = requireAdminActionService(context, options);
+
+    if (actionService instanceof Response) {
+      return actionService;
+    }
+
+    const jobId = requiredIntegerParam(context, "jobId");
+
+    if (jobId === "invalid") {
+      return validationError(context, "Invalid job ID.");
+    }
+
+    try {
+      const action = await actionService.retryJob({
+        jobId,
+        actor: context.get("adminUser"),
+        now: options.now()
+      });
+      return context.json(adminActionResponseSchema.parse({ ok: true, action }));
+    } catch (error) {
+      return adminActionError(context, error);
+    }
   });
 
   app.post("/search", async (context) => {

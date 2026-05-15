@@ -487,6 +487,10 @@ describe("admin read model storage", () => {
       createdAt: "2026-05-13T10:00:00.000Z",
       finishedAt: "2026-05-13T10:01:00.000Z"
     });
+    await testDb.sql`
+      insert into admin_audit_events (event_type, target_type, target_id, details, created_at)
+      values ('admin.source.refresh', 'source', 'bun', '{"status":"queued"}'::jsonb, ${now})
+    `;
 
     const pages = await storage.listPages({ sourceId: "bun", freshness: "expired", hasEmbedding: false, limit: 500, now });
     const pageDetail = await storage.getPageDetail({ sourceId: "bun", pageId: freshPage, now });
@@ -511,6 +515,14 @@ describe("admin read model storage", () => {
     expect(chunkDetail?.nextChunkId).toBeNull();
     expect(failedJobs.items.map((job) => job.id)).toEqual([failedJob]);
     expect(jobDetail?.lastError).toBe("boom");
-    expect(audit.available).toBe(false);
+    expect(audit.available).toBe(true);
+    expect(audit.available ? audit.items[0] : undefined).toMatchObject({
+      eventType: "admin.source.refresh",
+      targetType: "source",
+      targetId: "bun",
+      details: {
+        status: "queued"
+      }
+    });
   });
 });

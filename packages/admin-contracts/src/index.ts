@@ -335,6 +335,42 @@ export const adminJobResponseSchema = z
   })
   .strict();
 
+export const adminActionTypeSchema = z.enum(["source_refresh", "job_retry", "source_tombstone", "source_purge_reindex"]);
+export const adminActionStatusSchema = z.enum(["queued", "deduplicated", "skipped_bounds", "retried", "tombstoned", "purge_reindex_queued"]);
+
+export const adminConfirmedSourceActionRequestSchema = z
+  .object({
+    confirmation: z.string().min(1),
+    reason: z.string().min(1).max(500).optional()
+  })
+  .strict();
+
+export type AdminConfirmedSourceActionRequest = z.infer<typeof adminConfirmedSourceActionRequestSchema>;
+
+export const adminActionResultSchema = z
+  .object({
+    actionType: adminActionTypeSchema,
+    status: adminActionStatusSchema,
+    sourceId: z.string().min(1).nullable(),
+    jobId: z.number().int().nonnegative().nullable(),
+    queuedJobId: z.number().int().nonnegative().nullable(),
+    affectedPages: z.number().int().nonnegative().nullable(),
+    auditEventId: z.number().int().nonnegative().nullable(),
+    message: z.string().min(1)
+  })
+  .strict();
+
+export type AdminActionResult = z.infer<typeof adminActionResultSchema>;
+
+export const adminActionResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    action: adminActionResultSchema
+  })
+  .strict();
+
+export type AdminActionResponse = z.infer<typeof adminActionResponseSchema>;
+
 export const adminAuditEventsResponseSchema = z
   .object({
     ok: z.literal(true),

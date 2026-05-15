@@ -1,6 +1,8 @@
 import {
+  adminActionResponseSchema,
   adminAuthUserResponseSchema,
   adminChunkResponseSchema,
+  adminConfirmedSourceActionRequestSchema,
   adminErrorResponseSchema,
   adminJobResponseSchema,
   adminKpisResponseSchema,
@@ -14,7 +16,9 @@ import {
   adminSearchResponseSchema,
   adminSourceResponseSchema,
   adminSourcesResponseSchema,
+  type AdminActionResult,
   type AdminChunkDetail,
+  type AdminConfirmedSourceActionRequest,
   type AdminErrorResponse,
   type AdminJobSummary,
   type AdminKpiWindow,
@@ -196,6 +200,42 @@ export class AdminApiClient {
     });
 
     return response.job;
+  }
+
+  async refreshSource(sourceId: string): Promise<AdminActionResult> {
+    const response = await this.fetchJson(`/api/admin/sources/${encodeURIComponent(sourceId)}/actions/refresh`, adminActionResponseSchema, {
+      method: "POST"
+    });
+
+    return response.action;
+  }
+
+  async retryJob(jobId: number): Promise<AdminActionResult> {
+    const response = await this.fetchJson(`/api/admin/jobs/${encodeURIComponent(String(jobId))}/actions/retry`, adminActionResponseSchema, {
+      method: "POST"
+    });
+
+    return response.action;
+  }
+
+  async tombstoneSource(sourceId: string, input: AdminConfirmedSourceActionRequest): Promise<AdminActionResult> {
+    const request = adminConfirmedSourceActionRequestSchema.parse(input);
+    const response = await this.fetchJson(`/api/admin/sources/${encodeURIComponent(sourceId)}/actions/tombstone`, adminActionResponseSchema, {
+      method: "POST",
+      body: JSON.stringify(request)
+    });
+
+    return response.action;
+  }
+
+  async purgeReindexSource(sourceId: string, input: Pick<AdminConfirmedSourceActionRequest, "confirmation">): Promise<AdminActionResult> {
+    const request = adminConfirmedSourceActionRequestSchema.parse(input);
+    const response = await this.fetchJson(`/api/admin/sources/${encodeURIComponent(sourceId)}/actions/purge-reindex`, adminActionResponseSchema, {
+      method: "POST",
+      body: JSON.stringify(request)
+    });
+
+    return response.action;
   }
 
   async search(input: AdminSearchRequest): Promise<AdminSearchResponse> {

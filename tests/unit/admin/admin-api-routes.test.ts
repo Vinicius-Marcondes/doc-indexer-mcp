@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  adminActionResponseSchema,
   adminErrorResponseSchema,
   adminOverviewResponseSchema,
   adminSearchResponseSchema
@@ -10,6 +11,7 @@ import {
   type AdminReadModels,
   type AdminSearchService
 } from "../../../apps/admin-console/server/src/api";
+import type { AdminActionService } from "../../../apps/admin-console/server/src/actions";
 import {
   hashAdminPassword,
   type AdminAuthSession,
@@ -350,6 +352,66 @@ class FakeSearchService implements AdminSearchService {
   }
 }
 
+class FakeActionService implements AdminActionService {
+  calls: Array<{ type: string; input: unknown }> = [];
+
+  async refreshSource(input: Parameters<AdminActionService["refreshSource"]>[0]) {
+    this.calls.push({ type: "refreshSource", input });
+    return {
+      actionType: "source_refresh" as const,
+      status: "queued" as const,
+      sourceId: input.sourceId,
+      jobId: null,
+      queuedJobId: 101,
+      affectedPages: null,
+      auditEventId: 1,
+      message: "Source refresh queued."
+    };
+  }
+
+  async retryJob(input: Parameters<AdminActionService["retryJob"]>[0]) {
+    this.calls.push({ type: "retryJob", input });
+    return {
+      actionType: "job_retry" as const,
+      status: "retried" as const,
+      sourceId: "bun",
+      jobId: input.jobId,
+      queuedJobId: 102,
+      affectedPages: null,
+      auditEventId: 2,
+      message: "Failed job retry queued."
+    };
+  }
+
+  async tombstoneSource(input: Parameters<AdminActionService["tombstoneSource"]>[0]) {
+    this.calls.push({ type: "tombstoneSource", input });
+    return {
+      actionType: "source_tombstone" as const,
+      status: "tombstoned" as const,
+      sourceId: input.sourceId,
+      jobId: null,
+      queuedJobId: null,
+      affectedPages: 2,
+      auditEventId: 3,
+      message: "Source pages tombstoned."
+    };
+  }
+
+  async purgeReindexSource(input: Parameters<AdminActionService["purgeReindexSource"]>[0]) {
+    this.calls.push({ type: "purgeReindexSource", input });
+    return {
+      actionType: "source_purge_reindex" as const,
+      status: "purge_reindex_queued" as const,
+      sourceId: input.sourceId,
+      jobId: null,
+      queuedJobId: 103,
+      affectedPages: 2,
+      auditEventId: 4,
+      message: "Source tombstoned and reindex queued."
+    };
+  }
+}
+
 async function makeApp() {
   const authStore = new MemoryAuthStore();
   authStore.users.set(1, {
@@ -369,16 +431,18 @@ async function makeApp() {
 
   const readModels = new FakeReadModels();
   const searchService = new FakeSearchService();
+  const actionService = new FakeActionService();
   const app = createAdminApiRoutes({
     authStore,
     readModels,
     searchService,
+    actionService,
     now: () => now,
     secureCookies: false,
     sessionTtlSeconds: 3600
   });
 
-  return { app, readModels, searchService };
+  return { app, readModels, searchService, actionService };
 }
 
 async function loginCookie(app: ReturnType<typeof createAdminApiRoutes>, email = "viewer@example.com", password = "viewer-password"): Promise<string> {
@@ -476,5 +540,94 @@ describe("admin API routes", () => {
         limit: 5
       }
     ]);
+  });
+
+  test("viewer cannot call mutation routes", async () => {
+    const { app, actionService } = await makeApp();
+    const cookie = await loginCookie(app);
+    const requests = [
+      app.request("/sources/bun/actions/refresh", { method: "POST", headers: { cookie } }),
+      app.request("/jobs/7/actions/retry", { method: "POST", headers: { cookie } }),
+      app.request("/sources/bun/actions/tombstone", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ confirmation: "bun" })
+      }),
+      app.request("/sources/bun/actions/purge-reindex", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ confirmation: "bun" })
+      })
+    ];
+
+    const responses = await Promise.all(requests);
+
+    expect(responses.map((response) => response.status)).toEqual([403, 403, 403, 403]);
+    expect(actionService.calls).toEqual([]);
+  });
+
+  test("admin source refresh delegates to the action service with actor context", async () => {
+    const { app, actionService } = await makeApp();
+    const cookie = await loginCookie(app, "admin@example.com", "admin-password");
+    const response = await app.request("/sources/bun/actions/refresh", {
+      method: "POST",
+      headers: { cookie }
+    });
+    const body = adminActionResponseSchema.parse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(body.action).toMatchObject({
+      actionType: "source_refresh",
+      status: "queued",
+      sourceId: "bun",
+      queuedJobId: 101,
+      auditEventId: 1
+    });
+    expect(actionService.calls).toHaveLength(1);
+    expect(actionService.calls[0]).toMatchObject({
+      type: "refreshSource",
+      input: {
+        sourceId: "bun",
+        now,
+        actor: {
+          id: 1,
+          email: "admin@example.com",
+          role: "admin"
+        }
+      }
+    });
+  });
+
+  test("admin retry, tombstone, and purge/reindex routes validate input and return action results", async () => {
+    const { app, actionService } = await makeApp();
+    const cookie = await loginCookie(app, "admin@example.com", "admin-password");
+    const retryResponse = await app.request("/jobs/7/actions/retry", {
+      method: "POST",
+      headers: { cookie }
+    });
+    const tombstoneResponse = await app.request("/sources/bun/actions/tombstone", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ confirmation: "bun", reason: "retired docs source" })
+    });
+    const purgeResponse = await app.request("/sources/bun/actions/purge-reindex", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ confirmation: "bun" })
+    });
+    const invalidResponse = await app.request("/sources/bun/actions/tombstone", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ reason: "missing confirmation" })
+    });
+
+    expect(retryResponse.status).toBe(200);
+    expect(tombstoneResponse.status).toBe(200);
+    expect(purgeResponse.status).toBe(200);
+    expect(invalidResponse.status).toBe(400);
+    expect(adminActionResponseSchema.parse(await retryResponse.json()).action).toMatchObject({ actionType: "job_retry", queuedJobId: 102 });
+    expect(adminActionResponseSchema.parse(await tombstoneResponse.json()).action).toMatchObject({ actionType: "source_tombstone", affectedPages: 2 });
+    expect(adminActionResponseSchema.parse(await purgeResponse.json()).action).toMatchObject({ actionType: "source_purge_reindex", queuedJobId: 103 });
+    expect(actionService.calls.map((call) => call.type)).toEqual(["retryJob", "tombstoneSource", "purgeReindexSource"]);
   });
 });

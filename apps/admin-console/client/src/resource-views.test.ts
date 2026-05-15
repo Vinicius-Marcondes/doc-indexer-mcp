@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { QueryClient } from "@tanstack/react-query";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -7,7 +8,10 @@ import { AdminApiClient } from "./api-client";
 import {
   ChunkDetailView,
   JobDetailView,
+  SourceActionsPanel,
   SourcesTable,
+  invalidateAdminActionQueries,
+  isSourceActionConfirmationValid,
   sanitizeJobError
 } from "./resource-views";
 
@@ -119,7 +123,65 @@ describe("resource and job views", () => {
     expect(html).not.toContain("sk-testSecret123456");
     expect(html).not.toContain("hunter2");
   });
+
+  test("viewer role does not render source mutation actions", () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(SourceActionsPanel, {
+          source: sampleSource(),
+          userRole: "viewer",
+          refreshAction: idleAction(),
+          tombstoneAction: idleAction(),
+          purgeReindexAction: idleAction()
+        })
+      )
+    );
+
+    expect(html).not.toContain("Refresh source");
+    expect(html).not.toContain("Tombstone source");
+    expect(html).not.toContain("Purge and reindex");
+  });
+
+  test("source destructive action confirmation requires the typed source ID", () => {
+    expect(isSourceActionConfirmationValid("bun", "")).toBe(false);
+    expect(isSourceActionConfirmationValid("bun", "BUN")).toBe(false);
+    expect(isSourceActionConfirmationValid("bun", " bun ")).toBe(true);
+  });
+
+  test("successful admin action invalidates related source, job, overview, and audit queries", () => {
+    const queryClient = new QueryClient();
+    const keys = [
+      ["admin", "overview", "24h"],
+      ["admin", "sources", "list"],
+      ["admin", "sources", "bun"],
+      ["admin", "sources", "bun", "pages"],
+      ["admin", "jobs"],
+      ["admin", "jobs", 7],
+      ["admin", "audit"]
+    ] as const;
+
+    for (const key of keys) {
+      queryClient.setQueryData(key, "cached");
+    }
+
+    invalidateAdminActionQueries(queryClient, { sourceId: "bun", jobId: 7 });
+
+    for (const key of keys) {
+      expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
+    }
+  });
 });
+
+function idleAction() {
+  return {
+    isPending: false,
+    message: null,
+    error: null,
+    run: () => {}
+  };
+}
 
 function sampleSource(overrides: Partial<AdminSourceHealth> = {}): AdminSourceHealth {
   return {

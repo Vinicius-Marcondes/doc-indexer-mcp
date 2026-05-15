@@ -1,14 +1,18 @@
-import { type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
-import { useQuery } from "@tanstack/react-query";
+import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArchiveX, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import type {
+  AdminActionResult,
   AdminChunkDetail,
+  AdminConfirmedSourceActionRequest,
   AdminJobSummary,
   AdminPageDetail,
   AdminPageListItem,
+  AdminRole,
   AdminSourceHealth
 } from "@bun-dev-intel/admin-contracts";
-import { useAdminApi } from "./session";
+import { useAdminApi, useAdminSession } from "./session";
 import type { AdminJobListOptions, AdminPageListOptions } from "./api-client";
 
 const pageLimit = 25;
@@ -32,6 +36,8 @@ export function SourcesPage() {
 
 export function SourceDetailPage() {
   const api = useAdminApi();
+  const session = useAdminSession();
+  const queryClient = useQueryClient();
   const params = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const sourceId = params.sourceId ?? "";
@@ -51,6 +57,18 @@ export function SourceDetailPage() {
     queryFn: () => api.listJobs({ sourceId, limit: 5 }),
     enabled: sourceId.length > 0
   });
+  const refreshMutation = useMutation({
+    mutationFn: () => api.refreshSource(sourceId),
+    onSuccess: () => invalidateAdminActionQueries(queryClient, { sourceId })
+  });
+  const tombstoneMutation = useMutation({
+    mutationFn: (input: AdminConfirmedSourceActionRequest) => api.tombstoneSource(sourceId, input),
+    onSuccess: () => invalidateAdminActionQueries(queryClient, { sourceId })
+  });
+  const purgeReindexMutation = useMutation({
+    mutationFn: (input: Pick<AdminConfirmedSourceActionRequest, "confirmation">) => api.purgeReindexSource(sourceId, input),
+    onSuccess: () => invalidateAdminActionQueries(queryClient, { sourceId })
+  });
 
   if (sourceId.length === 0) {
     return <PageFrame title="Source"><InlineState tone="danger" title="Missing source ID" /></PageFrame>;
@@ -60,7 +78,33 @@ export function SourceDetailPage() {
     <PageFrame title={`Source: ${sourceId}`}>
       {sourceQuery.isLoading ? <InlineState tone="neutral" title="Loading source" /> : null}
       {sourceQuery.isError ? <InlineState tone="danger" title="Source failed to load" /> : null}
-      {sourceQuery.data === undefined ? null : <SourceSummary source={sourceQuery.data} />}
+      {sourceQuery.data === undefined ? null : (
+        <>
+          <SourceSummary source={sourceQuery.data} />
+          <SourceActionsPanel
+            source={sourceQuery.data}
+            userRole={session.data?.role ?? "viewer"}
+            refreshAction={{
+              isPending: refreshMutation.isPending,
+              message: actionMessage(refreshMutation.data),
+              error: actionErrorMessage(refreshMutation.error),
+              run: () => refreshMutation.mutate()
+            }}
+            tombstoneAction={{
+              isPending: tombstoneMutation.isPending,
+              message: actionMessage(tombstoneMutation.data),
+              error: actionErrorMessage(tombstoneMutation.error),
+              run: (input) => tombstoneMutation.mutate(input)
+            }}
+            purgeReindexAction={{
+              isPending: purgeReindexMutation.isPending,
+              message: actionMessage(purgeReindexMutation.data),
+              error: actionErrorMessage(purgeReindexMutation.error),
+              run: (input) => purgeReindexMutation.mutate(input)
+            }}
+          />
+        </>
+      )}
       <section className="split-section">
         <div>
           <SectionHeader title="Pages" />
@@ -159,12 +203,18 @@ export function JobsPage() {
 
 export function JobDetailPage() {
   const api = useAdminApi();
+  const session = useAdminSession();
+  const queryClient = useQueryClient();
   const params = useParams();
   const jobId = parseRouteId(params.jobId);
   const jobQuery = useQuery({
     queryKey: ["admin", "jobs", jobId],
     queryFn: () => api.getJob(jobId ?? -1),
     enabled: jobId !== null
+  });
+  const retryMutation = useMutation({
+    mutationFn: () => api.retryJob(jobId ?? -1),
+    onSuccess: () => invalidateAdminActionQueries(queryClient, { sourceId: jobQuery.data?.sourceId, jobId: jobId ?? undefined })
   });
 
   if (jobId === null) {
@@ -175,7 +225,21 @@ export function JobDetailPage() {
     <PageFrame title="Job Detail">
       {jobQuery.isLoading ? <InlineState tone="neutral" title="Loading job" /> : null}
       {jobQuery.isError ? <InlineState tone="danger" title="Job failed to load" /> : null}
-      {jobQuery.data === undefined ? null : <JobDetailView job={jobQuery.data} />}
+      {jobQuery.data === undefined ? null : (
+        <>
+          <JobDetailView job={jobQuery.data} />
+          <JobActionsPanel
+            job={jobQuery.data}
+            userRole={session.data?.role ?? "viewer"}
+            retryAction={{
+              isPending: retryMutation.isPending,
+              message: actionMessage(retryMutation.data),
+              error: actionErrorMessage(retryMutation.error),
+              run: () => retryMutation.mutate()
+            }}
+          />
+        </>
+      )}
     </PageFrame>
   );
 }
@@ -244,6 +308,98 @@ function SourceSummary(props: { readonly source: AdminSourceHealth }) {
         <DetailItem label="Oldest fetched" value={formatDateTime(props.source.oldestFetchedPage)} />
         <DetailItem label="Newest indexed" value={formatDateTime(props.source.newestIndexedPage)} />
       </dl>
+    </section>
+  );
+}
+
+interface AdminActionControl<TInput = void> {
+  readonly isPending: boolean;
+  readonly message: string | null;
+  readonly error: string | null;
+  readonly run: (input: TInput) => void;
+}
+
+export function SourceActionsPanel(props: {
+  readonly source: AdminSourceHealth;
+  readonly userRole: AdminRole;
+  readonly refreshAction: AdminActionControl;
+  readonly tombstoneAction: AdminActionControl<AdminConfirmedSourceActionRequest>;
+  readonly purgeReindexAction: AdminActionControl<Pick<AdminConfirmedSourceActionRequest, "confirmation">>;
+}) {
+  const [tombstoneConfirmation, setTombstoneConfirmation] = useState("");
+  const [tombstoneReason, setTombstoneReason] = useState("");
+  const [purgeConfirmation, setPurgeConfirmation] = useState("");
+
+  if (props.userRole !== "admin") {
+    return null;
+  }
+
+  const tombstoneReady = isSourceActionConfirmationValid(props.source.sourceId, tombstoneConfirmation);
+  const purgeReady = isSourceActionConfirmationValid(props.source.sourceId, purgeConfirmation);
+
+  return (
+    <section className="action-panel" aria-label="Source actions">
+      <div className="action-panel-heading">
+        <h3>Admin actions</h3>
+        <StatusBadge tone="warn" label="admin only" />
+      </div>
+      <div className="action-grid">
+        <div className="action-card">
+          <div>
+            <h4>Refresh source</h4>
+            <span>Queue a manual source index job.</span>
+          </div>
+          <button className="button button-secondary" type="button" disabled={props.refreshAction.isPending} onClick={() => props.refreshAction.run()}>
+            <RefreshCw size={15} aria-hidden="true" />
+            {props.refreshAction.isPending ? "Queueing" : "Refresh source"}
+          </button>
+          <ActionFeedback message={props.refreshAction.message} error={props.refreshAction.error} />
+        </div>
+        <div className="action-card">
+          <div>
+            <h4>Tombstone source</h4>
+            <span>Mark current pages as disabled without physical delete.</span>
+          </div>
+          <label>
+            <span>Reason</span>
+            <input value={tombstoneReason} onChange={(event) => setTombstoneReason(event.target.value)} placeholder="admin tombstone" />
+          </label>
+          <label>
+            <span>Type source ID</span>
+            <input value={tombstoneConfirmation} onChange={(event) => setTombstoneConfirmation(event.target.value)} placeholder={props.source.sourceId} />
+          </label>
+          <button
+            className="button button-danger"
+            type="button"
+            disabled={!tombstoneReady || props.tombstoneAction.isPending}
+            onClick={() => props.tombstoneAction.run({ confirmation: tombstoneConfirmation.trim(), ...(tombstoneReason.trim().length === 0 ? {} : { reason: tombstoneReason.trim() }) })}
+          >
+            <ArchiveX size={15} aria-hidden="true" />
+            {props.tombstoneAction.isPending ? "Tombstoning" : "Tombstone source"}
+          </button>
+          <ActionFeedback message={props.tombstoneAction.message} error={props.tombstoneAction.error} />
+        </div>
+        <div className="action-card">
+          <div>
+            <h4>Purge and reindex</h4>
+            <span>Tombstone current pages and queue a replacement index run.</span>
+          </div>
+          <label>
+            <span>Type source ID</span>
+            <input value={purgeConfirmation} onChange={(event) => setPurgeConfirmation(event.target.value)} placeholder={props.source.sourceId} />
+          </label>
+          <button
+            className="button button-danger"
+            type="button"
+            disabled={!purgeReady || props.purgeReindexAction.isPending}
+            onClick={() => props.purgeReindexAction.run({ confirmation: purgeConfirmation.trim() })}
+          >
+            <Trash2 size={15} aria-hidden="true" />
+            {props.purgeReindexAction.isPending ? "Queueing" : "Purge and reindex"}
+          </button>
+          <ActionFeedback message={props.purgeReindexAction.message} error={props.purgeReindexAction.error} />
+        </div>
+      </div>
     </section>
   );
 }
@@ -452,6 +608,36 @@ export function JobDetailView(props: { readonly job: AdminJobSummary }) {
   );
 }
 
+export function JobActionsPanel(props: {
+  readonly job: AdminJobSummary;
+  readonly userRole: AdminRole;
+  readonly retryAction: AdminActionControl;
+}) {
+  if (props.userRole !== "admin" || props.job.status !== "failed") {
+    return null;
+  }
+
+  return (
+    <section className="action-panel" aria-label="Job actions">
+      <div className="action-panel-heading">
+        <h3>Admin actions</h3>
+        <StatusBadge tone="warn" label="admin only" />
+      </div>
+      <div className="action-card action-card-inline">
+        <div>
+          <h4>Retry failed job</h4>
+          <span>Queue a new manual job with the same target.</span>
+        </div>
+        <button className="button button-secondary" type="button" disabled={props.retryAction.isPending} onClick={() => props.retryAction.run()}>
+          <RotateCcw size={15} aria-hidden="true" />
+          {props.retryAction.isPending ? "Retrying" : "Retry failed job"}
+        </button>
+        <ActionFeedback message={props.retryAction.message} error={props.retryAction.error} />
+      </div>
+    </section>
+  );
+}
+
 function PageFiltersForm(props: { readonly filters: AdminPageListOptions; readonly onSubmit: (next: URLSearchParams) => void }) {
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -640,6 +826,46 @@ export function sanitizeJobError(value: string | null): string | null {
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
     .replace(/\b(sk|pk|rk)-[A-Za-z0-9_-]{8,}\b/g, "$1-[redacted]")
     .replace(/\b([A-Za-z0-9_.-]*(?:token|secret|password|api[_-]?key)[A-Za-z0-9_.-]*)(=|:)\s*([^\s,;]+)/gi, "$1$2 [redacted]");
+}
+
+export function isSourceActionConfirmationValid(sourceId: string, confirmation: string): boolean {
+  return confirmation.trim() === sourceId;
+}
+
+export function invalidateAdminActionQueries(queryClient: QueryClient, input: { readonly sourceId?: string; readonly jobId?: number }): void {
+  void queryClient.invalidateQueries({ queryKey: ["admin", "overview"] });
+  void queryClient.invalidateQueries({ queryKey: ["admin", "kpis"] });
+  void queryClient.invalidateQueries({ queryKey: ["admin", "sources"] });
+  void queryClient.invalidateQueries({ queryKey: ["admin", "jobs"] });
+  void queryClient.invalidateQueries({ queryKey: ["admin", "audit"] });
+
+  if (input.sourceId !== undefined) {
+    void queryClient.invalidateQueries({ queryKey: ["admin", "sources", input.sourceId] });
+  }
+
+  if (input.jobId !== undefined) {
+    void queryClient.invalidateQueries({ queryKey: ["admin", "jobs", input.jobId] });
+  }
+}
+
+function ActionFeedback(props: { readonly message: string | null; readonly error: string | null }) {
+  if (props.error !== null) {
+    return <span className="action-feedback action-feedback-error">{props.error}</span>;
+  }
+
+  if (props.message !== null) {
+    return <span className="action-feedback">{props.message}</span>;
+  }
+
+  return null;
+}
+
+function actionMessage(action: AdminActionResult | undefined): string | null {
+  return action?.message ?? null;
+}
+
+function actionErrorMessage(error: Error | null): string | null {
+  return error === null ? null : error.message;
 }
 
 function PageFrame(props: { readonly title: string; readonly children: ReactNode }) {

@@ -518,6 +518,25 @@ export class RemoteDocsStorage {
     return rows[0] === undefined ? null : mapPageDetail(rows[0]);
   }
 
+  async markSourcePagesTombstoned(input: {
+    readonly sourceId: string;
+    readonly reason: string;
+    readonly now: string;
+  }): Promise<number> {
+    const rows = await this.sql<Array<{ id: number }>>`
+      update doc_pages
+      set
+        tombstoned_at = ${input.now},
+        tombstone_reason = ${input.reason},
+        updated_at = ${input.now}
+      where source_id = ${input.sourceId}
+        and tombstoned_at is null
+      returning id
+    `;
+
+    return rows.length;
+  }
+
   async recordConfirmedRemovalFailure(input: {
     readonly sourceId: string;
     readonly url: string;
