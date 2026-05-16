@@ -18,9 +18,11 @@ describe("project scaffold", () => {
       dependencies?: Record<string, string>;
       scripts?: Record<string, string>;
       type?: string;
+      workspaces?: string[];
     };
 
     expect(packageJson.type).toBe("module");
+    expect(packageJson.workspaces).toEqual(["apps/*", "apps/admin-console/*", "packages/*"]);
     expect(packageJson.scripts?.test).toBe("bun test");
     expect(packageJson.scripts?.typecheck).toContain("tsc");
     expect(packageJson.scripts?.typecheck).toContain("--noEmit");
@@ -64,10 +66,15 @@ describe("project scaffold", () => {
     expect(existsSync(resolve(rootDir, "src/sources"))).toBe(true);
     expect(existsSync(resolve(rootDir, "src/cache"))).toBe(true);
     expect(existsSync(resolve(rootDir, "src/shared"))).toBe(true);
+    expect(existsSync(resolve(rootDir, "apps"))).toBe(true);
+    expect(existsSync(resolve(rootDir, "apps/mcp-http"))).toBe(true);
+    expect(existsSync(resolve(rootDir, "apps/docs-worker"))).toBe(true);
+    expect(existsSync(resolve(rootDir, "apps/admin-console/server"))).toBe(true);
+    expect(existsSync(resolve(rootDir, "apps/admin-console/client"))).toBe(true);
+    expect(existsSync(resolve(rootDir, "packages"))).toBe(true);
     expect(existsSync(resolve(rootDir, "tests/unit"))).toBe(true);
     expect(existsSync(resolve(rootDir, "tests/integration"))).toBe(true);
     expect(existsSync(resolve(rootDir, "src/analyzers"))).toBe(false);
-    expect(existsSync(resolve(rootDir, "apps/admin-console"))).toBe(false);
   });
 
   test("documents the remote docs HTTP dependency plan", () => {

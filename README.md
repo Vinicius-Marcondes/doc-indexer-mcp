@@ -183,11 +183,10 @@ Start the optional admin console profile:
 docker compose --env-file .env --profile admin up --build
 ```
 
-Run migrations before first use and after schema changes:
+The MCP HTTP container runs migrations automatically before binding the server port. To run the same migration command manually:
 
 ```bash
-docker compose --env-file .env run --rm mcp-http-server \
-  bun -e 'import { createPostgresClient, runRemoteDocsMigrations } from "@bun-dev-intel/db"; const sql = createPostgresClient(Bun.env.DATABASE_URL); await runRemoteDocsMigrations(sql); await sql.end?.({ timeout: 1 });'
+docker compose --env-file .env run --rm mcp-http-server bun run db:migrate
 ```
 
 Default local endpoints:
@@ -207,12 +206,13 @@ Install dependencies, provide the same environment variables, and run the proces
 
 ```bash
 bun install
+bun run db:migrate
 bun apps/mcp-http/src/index.ts
 bun apps/docs-worker/src/index.ts
 bun apps/admin-console/server/src/index.ts
 ```
 
-When running manually, make sure Postgres has pgvector enabled and the migrations under `migrations/remote-docs/` have been applied. The worker reuses the shared remote-docs configuration parser, so provide the MCP HTTP variables as part of the same environment even though the worker does not bind an HTTP port. Build the admin client before serving static admin assets from `apps/admin-console/client/dist`.
+When running manually without Docker, make sure Postgres has pgvector available. The worker reuses the shared remote-docs configuration parser, so provide the MCP HTTP variables as part of the same environment even though the worker does not bind an HTTP port. Build the admin client before serving static admin assets from `apps/admin-console/client/dist`.
 
 ## Connect An MCP Client
 

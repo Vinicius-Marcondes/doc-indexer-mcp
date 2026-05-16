@@ -9,14 +9,12 @@ function read(path: string): string {
 }
 
 describe("HTTP project import boundary", () => {
-  test("local stdio, analyzer, and admin source trees are not present in the HTTP repo", () => {
+  test("local stdio and analyzer source trees are not present in the HTTP runtime", () => {
     for (const removedPath of [
       "src/stdio.ts",
       "src/analyzers",
       "src/security",
-      "src/recommendations",
-      "apps/admin-console",
-      "packages/admin-contracts"
+      "src/recommendations"
     ]) {
       expect(existsSync(resolve(rootDir, removedPath))).toBe(false);
     }
@@ -40,6 +38,12 @@ describe("HTTP project import boundary", () => {
 
     expect(combined).toContain("createRemoteDocsMcpServer");
     expect(combined).toContain("registerRemoteDocsCapabilities");
+    expect(combined).not.toContain("apps/admin-console");
+    expect(combined).toContain("../packages/db/src");
+    expect(combined).toContain("../packages/docs-domain/src");
+    expect(combined).not.toContain("./docs/storage/");
+    expect(combined).not.toContain("./docs/retrieval/");
+    expect(combined).not.toContain("./docs/refresh/");
   });
 
   test("package and Docker metadata do not reference split-out projects", () => {
@@ -49,8 +53,7 @@ describe("HTTP project import boundary", () => {
     };
     const dockerfile = read("Dockerfile");
 
-    expect(packageJson.workspaces).toBeUndefined();
-    expect(Object.keys(packageJson.scripts ?? {}).some((script) => script.startsWith("admin:"))).toBe(false);
+    expect(packageJson.workspaces).toEqual(["apps/*", "apps/admin-console/*", "packages/*"]);
     expect(dockerfile).not.toContain("apps/admin-console");
     expect(dockerfile).not.toContain("admin-console");
     expect(dockerfile).not.toContain("TypeScript compiler API");

@@ -29,6 +29,8 @@ export interface OpenAiEmbeddingProviderFactoryOptions {
   readonly fetchImpl?: OpenAiEmbeddingFetchLike;
 }
 
+const defaultOpenAiBaseUrl = "https://api.openai.com/v1";
+
 function defaultDimensionsForModel(model: string): number {
   if (model === "text-embedding-3-large") {
     return 3072;
@@ -141,7 +143,7 @@ export class OpenAiEmbeddingProvider implements EmbeddingProvider {
     this.client = new OpenAI({
       apiKey: options.apiKey,
       maxRetries: 0,
-      ...(options.baseUrl === undefined ? {} : { baseURL: options.baseUrl }),
+      baseURL: options.baseUrl ?? defaultOpenAiBaseUrl,
       ...(options.fetchImpl === undefined ? {} : { fetch: options.fetchImpl as unknown as typeof fetch })
     });
   }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { bunDocsSourcePack } from "../../../../src/docs/sources/bun-source-pack";
-import { chunkDocsPage } from "../../../../src/docs/ingestion/chunking";
+import { bunDocsSourcePack } from "../../../../packages/docs-domain/src/docs/sources/bun-source-pack";
+import { chunkDocsPage } from "../../../../packages/docs-domain/src/docs/ingestion/chunking";
 
 const baseInput = {
   sourceId: "bun",

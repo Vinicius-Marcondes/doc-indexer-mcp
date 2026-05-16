@@ -1,4 +1,4 @@
-import { createPostgresClient, runRemoteDocsMigrations, type SqlClient } from "../../../src/docs/storage/database";
+import { createPostgresClient, runRemoteDocsMigrations, type SqlClient } from "../../../packages/db/src";
 
 export interface RemoteDocsTestDatabase {
   readonly sql: SqlClient;

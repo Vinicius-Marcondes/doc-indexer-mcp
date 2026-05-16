@@ -6,7 +6,7 @@ import {
   createNoEvidenceError,
   structuredErrorSchema,
   toStructuredError
-} from "../../src/shared/errors";
+} from "../../packages/contracts/src/errors";
 
 describe("structured errors", () => {
   test("invalid input returns a schema validation error", () => {

@@ -4,9 +4,9 @@ import {
   computeRefreshPriority,
   type RefreshQueueStore,
   type RefreshQueueStoredJob
-} from "../../../../src/docs/refresh/refresh-queue";
-import type { CreateRefreshJobInput, RefreshJobReason, RefreshJobType } from "../../../../src/docs/storage/docs-storage";
-import { defaultDocsSourceRegistry } from "../../../../src/docs/sources/bun-source-pack";
+} from "../../../../packages/docs-domain/src/docs/refresh/refresh-queue";
+import type { CreateRefreshJobInput, RefreshJobReason, RefreshJobType } from "../../../../packages/docs-domain/src/docs/storage/docs-storage";
+import { defaultDocsSourceRegistry } from "../../../../packages/docs-domain/src/docs/sources/bun-source-pack";
 
 const now = "2026-05-14T12:00:00.000Z";
 

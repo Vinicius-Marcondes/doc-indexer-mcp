@@ -6,9 +6,14 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { SqliteCacheStore } from "./cache/sqlite-cache";
 import { createAuditLogger, type AuditLogEnv, type AuditLogger } from "./logging/audit-logger";
-import { getDocPage, getDocPageInputSchema } from "./tools/get-doc-page";
-import { searchBunDocs, searchBunDocsInputSchema } from "./tools/search-bun-docs";
-import { searchDocs, searchDocsInputSchema, type SearchDocsRefreshQueue, type SearchDocsRetrieval } from "./tools/search-docs";
+import { getDocPage, getDocPageInputSchema } from "../packages/docs-domain/src/tools/get-doc-page";
+import { searchBunDocs, searchBunDocsInputSchema } from "../packages/docs-domain/src/tools/search-bun-docs";
+import {
+  searchDocs,
+  searchDocsInputSchema,
+  type SearchDocsRefreshQueue,
+  type SearchDocsRetrieval
+} from "../packages/docs-domain/src/tools/search-docs";
 import { SourceFetchClient, type FetchLike } from "./sources/fetch-client";
 import { BunDocsIndexAdapter } from "./sources/bun-docs-index";
 import { BunDocsPageAdapter } from "./sources/bun-docs-page";
@@ -35,15 +40,14 @@ import {
   type DocsPageStore
 } from "./resources/docs-resources";
 import type { RemoteDocsConfig } from "./config/remote-docs-config";
-import { createOpenAiEmbeddingProviderFromConfig } from "./docs/embeddings/openai-provider";
-import { RefreshJobQueue } from "./docs/refresh/refresh-queue";
-import { HybridDocsRetrieval } from "./docs/retrieval/hybrid-retrieval";
-import { PostgresKeywordRetrieval } from "./docs/retrieval/keyword-retrieval";
-import { PostgresVectorRetrieval } from "./docs/retrieval/vector-retrieval";
-import { defaultDocsSourceRegistry } from "./docs/sources/bun-source-pack";
-import type { DocsSourceRegistry } from "./docs/sources/registry";
-import { createPostgresClient } from "./docs/storage/database";
-import { RemoteDocsStorage } from "./docs/storage/docs-storage";
+import { createOpenAiEmbeddingProviderFromConfig } from "../packages/docs-domain/src/docs/embeddings/openai-provider";
+import { RefreshJobQueue } from "../packages/docs-domain/src/docs/refresh/refresh-queue";
+import { HybridDocsRetrieval } from "../packages/docs-domain/src/docs/retrieval/hybrid-retrieval";
+import { PostgresKeywordRetrieval } from "../packages/docs-domain/src/docs/retrieval/keyword-retrieval";
+import { PostgresVectorRetrieval } from "../packages/docs-domain/src/docs/retrieval/vector-retrieval";
+import { defaultDocsSourceRegistry } from "../packages/docs-domain/src/docs/sources/bun-source-pack";
+import type { DocsSourceRegistry } from "../packages/docs-domain/src/docs/sources/registry";
+import { createPostgresClient, RemoteDocsStorage } from "../packages/db/src";
 
 export interface ServerMetadata {
   readonly name: string;

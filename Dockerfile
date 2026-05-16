@@ -4,10 +4,15 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY package.json bun.lock tsconfig.json ./
-RUN bun install --frozen-lockfile
-
+COPY apps ./apps
+COPY packages ./packages
+COPY scripts ./scripts
 COPY src ./src
 COPY migrations ./migrations
 
+RUN bun install --frozen-lockfile
+RUN bun run admin:client:build
+
 EXPOSE 3000
-CMD ["bun", "src/http.ts"]
+EXPOSE 3100
+CMD ["sh", "-c", "bun run db:migrate && exec bun apps/mcp-http/src/index.ts"]

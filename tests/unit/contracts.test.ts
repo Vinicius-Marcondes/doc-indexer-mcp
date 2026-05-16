@@ -5,7 +5,7 @@ import {
   confidenceSchema,
   recommendationSchema,
   sourceCitationSchema
-} from "../../src/shared/contracts";
+} from "../../packages/contracts/src/contracts";
 
 describe("core result contracts", () => {
   test("validates allowed cache status values", () => {

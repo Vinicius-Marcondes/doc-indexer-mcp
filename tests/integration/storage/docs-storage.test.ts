@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { RemoteDocsStorage } from "../../../src/docs/storage/docs-storage";
-import type { SqlClient } from "../../../src/docs/storage/database";
+import { RemoteDocsStorage, type SqlClient } from "../../../packages/db/src";
 import { createRemoteDocsTestDatabase } from "./test-harness";
 
 function embedding1536(firstValue = 0.1): number[] {

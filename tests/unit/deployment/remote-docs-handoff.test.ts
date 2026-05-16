@@ -15,10 +15,11 @@ describe("remote docs HTTP handoff documentation", () => {
       "/mcp",
       "MCP_BEARER_TOKEN",
       "docker-compose.yml",
-      "bun src/http.ts",
-      "bun src/docs-worker.ts",
+      "bun apps/mcp-http/src/index.ts",
+      "bun apps/docs-worker/src/index.ts",
+      "bun apps/admin-console/server/src/index.ts",
       "bun-dev-intel-stdio-mcp",
-      "bun-dev-intel-admin-console",
+      "admin console",
       "remote HTTP",
       "docs-only",
       "scheduled refresh",
@@ -60,7 +61,7 @@ describe("remote docs HTTP handoff documentation", () => {
       "Documentation page and chunk retrieval",
       "Scheduled and on-demand refresh",
       "Docker deployment",
-      "Split-out sibling projects"
+      "Remote HTTP excludes local project analysis"
     ]) {
       expect(traceability).toContain(requirement);
     }
@@ -82,7 +83,7 @@ describe("remote docs HTTP handoff documentation", () => {
       "Safe worker failure logs",
       "Running timeout configuration",
       "Remote HTTP remains docs-only",
-      "Split-out sibling projects"
+      "Admin console remains a separate optional process"
     ]) {
       expect(traceability).toContain(requirement);
     }

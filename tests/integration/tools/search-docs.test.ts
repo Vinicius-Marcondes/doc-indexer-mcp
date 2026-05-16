@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { searchDocs } from "../../../src/tools/search-docs";
+import { searchDocs } from "../../../packages/docs-domain/src/tools/search-docs";
 import {
   HybridDocsRetrieval,
   type DocsRetrievalInput,
   type DocsRetrievalResult
-} from "../../../src/docs/retrieval/hybrid-retrieval";
-import type { KeywordSearchInput, KeywordSearchResult } from "../../../src/docs/retrieval/keyword-retrieval";
-import type { VectorSearchInput, VectorSearchResult } from "../../../src/docs/retrieval/vector-retrieval";
-import { defaultDocsSourceRegistry } from "../../../src/docs/sources/bun-source-pack";
-import type { EnqueueRefreshJobInput } from "../../../src/docs/refresh/refresh-queue";
+} from "../../../packages/docs-domain/src/docs/retrieval/hybrid-retrieval";
+import type { KeywordSearchInput, KeywordSearchResult } from "../../../packages/docs-domain/src/docs/retrieval/keyword-retrieval";
+import type { VectorSearchInput, VectorSearchResult } from "../../../packages/docs-domain/src/docs/retrieval/vector-retrieval";
+import { defaultDocsSourceRegistry } from "../../../packages/docs-domain/src/docs/sources/bun-source-pack";
+import type { EnqueueRefreshJobInput } from "../../../packages/docs-domain/src/docs/refresh/refresh-queue";
 
 const generatedAt = "2026-05-14T12:00:00.000Z";
 
