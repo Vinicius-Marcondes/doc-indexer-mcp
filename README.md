@@ -189,6 +189,8 @@ The MCP HTTP container runs migrations automatically before binding the server p
 docker compose --env-file .env run --rm mcp-http-server bun run db:migrate
 ```
 
+Migrations are forward-only SQL files under `migrations/remote-docs/`. The runner serializes concurrent startups with a Postgres advisory lock, records applied filenames in `schema_migrations`, and skips files that are already tracked.
+
 Default local endpoints:
 
 ```text

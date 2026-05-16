@@ -29,7 +29,8 @@ describe("remote docs Postgres migrations", () => {
     expect(migrationFiles()).toEqual([
       "0001_remote_docs_schema.sql",
       "0002_admin_auth_schema.sql",
-      "0003_admin_audit_events.sql"
+      "0003_admin_audit_events.sql",
+      "0004_schema_migrations_table.sql"
     ]);
   });
 
@@ -46,6 +47,7 @@ describe("remote docs Postgres migrations", () => {
       "doc_refresh_jobs",
       "doc_retrieval_events",
       "admin_users",
+      "schema_migrations",
       "admin_sessions",
       "admin_audit_events"
     ]) {
@@ -72,6 +74,8 @@ describe("remote docs Postgres migrations", () => {
     expect(sql).toContain("admin_sessions_active_token_idx");
     expect(sql).toContain("admin_audit_events_created_id_idx");
     expect(sql).toContain("admin_audit_events_actor_user_id_idx");
+    expect(sql).toContain("filename text primary key");
+    expect(sql).toContain("applied_at timestamptz not null default now()");
   });
 
   const testDatabaseUrl = process.env.TEST_DATABASE_URL;
@@ -113,7 +117,8 @@ describe("remote docs Postgres migrations", () => {
         "doc_pages",
         "doc_refresh_jobs",
         "doc_retrieval_events",
-        "doc_sources"
+        "doc_sources",
+        "schema_migrations"
       ]);
       expect(indexes.map((row) => row.indexname)).toContain("doc_chunks_search_vector_idx");
       expect(indexes.map((row) => row.indexname)).toContain("doc_embeddings_embedding_hnsw_idx");
