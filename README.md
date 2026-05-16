@@ -29,7 +29,7 @@ This repository does not own local project analysis or stdio MCP transport. Thos
 - `apps/admin-console/server`: Hono admin API and static admin asset host.
 - `apps/admin-console/client`: React/Vite admin browser UI.
 - `packages/docs-domain`: shared docs-domain package surface for source policy, source packs, ingestion, embeddings, retrieval, refresh, and docs tool services; many exports still facade root `src/docs` and `src/tools` implementation during the migration.
-- `packages/db`: Postgres client, migration runner, docs storage, row mappers, and database-facing types.
+- `packages/db`: Postgres client, Drizzle schema/client wrapper, migration runner, docs storage, and database-facing types.
 - `packages/contracts`: shared docs/MCP-adjacent DTOs, Zod schemas, and structured errors.
 - `packages/admin-contracts`: browser-safe admin API DTOs and Zod schemas.
 - `src`: transitional compatibility and remaining root implementation surface for existing imports, MCP registration, legacy Bun docs resources, source/cache adapters, and docs-domain facades.
@@ -69,7 +69,7 @@ Runtime separation is operational, not repository separation:
 - Apps may import packages; packages must not import apps.
 - MCP HTTP and admin server must not import each other.
 - Admin client code must stay browser-safe and import only browser-safe contracts from `packages/admin-contracts`.
-- `packages/db` owns database-facing code and migration execution.
+- `packages/db` owns database-facing code, the Drizzle schema/client wrapper, and migration execution.
 - `migrations/remote-docs` is the only canonical schema stream.
 - `packages/contracts` and `packages/admin-contracts` define boundary DTOs and validation schemas.
 - `packages/docs-domain` exposes the shared docs source policy, ingestion, retrieval, and refresh APIs used by MCP, worker, and admin.
@@ -269,6 +269,13 @@ Default checks are deterministic and offline:
 bun test
 bun run typecheck
 bun run check
+```
+
+Drizzle schema checks and SQL migration generation use `drizzle.config.ts` and the schema in `packages/db/src/schema.ts`:
+
+```bash
+bun run db:drizzle:check
+bun run db:drizzle:generate
 ```
 
 Admin client build verification:

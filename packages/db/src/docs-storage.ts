@@ -1,4 +1,13 @@
+import { and, asc, desc, eq, inArray, isNull, or, sql as drizzleSql } from "drizzle-orm";
 import type { SqlClient } from "./database";
+import { createDrizzleDatabase, type RemoteDocsDrizzleDatabase } from "./drizzle";
+import {
+  docChunks,
+  docPages,
+  docRefreshJobs,
+  docRetrievalEvents,
+  docSources
+} from "./schema";
 
 export interface StoredDocsSourceStats {
   readonly sourceId: string;
@@ -174,24 +183,6 @@ export interface RecordRetrievalEventInput {
   readonly refreshQueued: boolean;
 }
 
-interface SourceRow extends Record<string, unknown> {
-  readonly id: number;
-  readonly source_id: string;
-  readonly display_name: string;
-  readonly enabled: boolean;
-  readonly allowed_url_patterns: string[];
-  readonly default_ttl_seconds: number;
-}
-
-interface PageRow extends Record<string, unknown> {
-  readonly id: number;
-  readonly source_id: string;
-  readonly url: string;
-  readonly canonical_url: string;
-  readonly title: string;
-  readonly content_hash: string;
-}
-
 interface PageDetailRow extends Record<string, unknown> {
   readonly id: number;
   readonly source_id: string;
@@ -207,17 +198,19 @@ interface PageDetailRow extends Record<string, unknown> {
   readonly tombstone_reason: string | null;
 }
 
-interface ChunkRow extends Record<string, unknown> {
+interface PageDetailDrizzleRow {
   readonly id: number;
-  readonly source_id: string;
-  readonly page_id: number;
+  readonly sourceId: string;
   readonly url: string;
+  readonly canonicalUrl: string;
   readonly title: string;
-  readonly heading_path: string[];
-  readonly chunk_index: number;
   readonly content: string;
-  readonly content_hash: string;
-  readonly token_estimate: number;
+  readonly contentHash: string;
+  readonly fetchedAt: string;
+  readonly indexedAt: string;
+  readonly expiresAt: string | null;
+  readonly tombstonedAt: string | null;
+  readonly tombstoneReason: string | null;
 }
 
 interface ChunkDetailRow extends Record<string, unknown> {
@@ -270,12 +263,6 @@ interface RefreshJobRow extends Record<string, unknown> {
   readonly finished_at: string | null;
 }
 
-interface RetrievalEventRow extends Record<string, unknown> {
-  readonly id: number;
-  readonly source_id: string;
-  readonly query_hash: string;
-}
-
 function requiredRow<T>(rows: readonly T[], context: string): T {
   const row = rows[0];
 
@@ -284,28 +271,6 @@ function requiredRow<T>(rows: readonly T[], context: string): T {
   }
 
   return row;
-}
-
-function mapSource(row: SourceRow): DocSource {
-  return {
-    id: row.id,
-    sourceId: row.source_id,
-    displayName: row.display_name,
-    enabled: row.enabled,
-    allowedUrlPatterns: row.allowed_url_patterns,
-    defaultTtlSeconds: row.default_ttl_seconds
-  };
-}
-
-function mapPage(row: PageRow): DocPage {
-  return {
-    id: row.id,
-    sourceId: row.source_id,
-    url: row.url,
-    canonicalUrl: row.canonical_url,
-    title: row.title,
-    contentHash: row.content_hash
-  };
 }
 
 function toIsoString(value: string | null): string | null {
@@ -334,18 +299,20 @@ function mapPageDetail(row: PageDetailRow): StoredDocsPage {
   };
 }
 
-function mapChunk(row: ChunkRow): DocChunk {
+function mapDrizzlePageDetail(row: PageDetailDrizzleRow): StoredDocsPage {
   return {
     id: row.id,
-    sourceId: row.source_id,
-    pageId: row.page_id,
+    sourceId: row.sourceId,
     url: row.url,
+    canonicalUrl: row.canonicalUrl,
     title: row.title,
-    headingPath: row.heading_path,
-    chunkIndex: row.chunk_index,
     content: row.content,
-    contentHash: row.content_hash,
-    tokenEstimate: row.token_estimate
+    contentHash: row.contentHash,
+    fetchedAt: toIsoString(row.fetchedAt) ?? row.fetchedAt,
+    indexedAt: toIsoString(row.indexedAt) ?? row.indexedAt,
+    expiresAt: toIsoString(row.expiresAt),
+    tombstonedAt: toIsoString(row.tombstonedAt),
+    tombstoneReason: row.tombstoneReason
   };
 }
 
@@ -407,11 +374,13 @@ function mapRefreshJob(row: RefreshJobRow): RefreshJob {
   };
 }
 
-function mapRetrievalEvent(row: RetrievalEventRow): RetrievalEvent {
+function normalizeRefreshJob(row: RefreshJob): RefreshJob {
   return {
-    id: row.id,
-    sourceId: row.source_id,
-    queryHash: row.query_hash
+    ...row,
+    runAfter: toIsoString(row.runAfter) ?? row.runAfter,
+    createdAt: toIsoString(row.createdAt) ?? row.createdAt,
+    updatedAt: toIsoString(row.updatedAt) ?? row.updatedAt,
+    finishedAt: row.finishedAt === null ? null : toIsoString(row.finishedAt) ?? row.finishedAt
   };
 }
 
@@ -444,32 +413,64 @@ function validateExistingEmbeddingCompatibility(input: InsertEmbeddingInput, exi
 }
 
 export class RemoteDocsStorage {
-  constructor(private readonly sql: SqlClient) {}
+  private db: RemoteDocsDrizzleDatabase | null = null;
+
+  constructor(private readonly sql: SqlClient, db?: RemoteDocsDrizzleDatabase) {
+    this.db = db ?? null;
+  }
+
+  private drizzle(): RemoteDocsDrizzleDatabase {
+    this.db ??= createDrizzleDatabase(this.sql);
+    return this.db;
+  }
 
   async upsertSource(input: UpsertSourceInput): Promise<DocSource> {
-    const rows = await this.sql<SourceRow[]>`
-      insert into doc_sources (source_id, display_name, enabled, allowed_url_patterns, default_ttl_seconds)
-      values (${input.sourceId}, ${input.displayName}, ${input.enabled}, to_jsonb(${input.allowedUrlPatterns}::text[]), ${input.defaultTtlSeconds})
-      on conflict (source_id) do update set
-        display_name = excluded.display_name,
-        enabled = excluded.enabled,
-        allowed_url_patterns = excluded.allowed_url_patterns,
-        default_ttl_seconds = excluded.default_ttl_seconds,
-        updated_at = now()
-      returning id, source_id, display_name, enabled, allowed_url_patterns, default_ttl_seconds
-    `;
+    const rows = await this.drizzle()
+      .insert(docSources)
+      .values({
+        sourceId: input.sourceId,
+        displayName: input.displayName,
+        enabled: input.enabled,
+        allowedUrlPatterns: input.allowedUrlPatterns,
+        defaultTtlSeconds: input.defaultTtlSeconds
+      })
+      .onConflictDoUpdate({
+        target: docSources.sourceId,
+        set: {
+          displayName: input.displayName,
+          enabled: input.enabled,
+          allowedUrlPatterns: input.allowedUrlPatterns,
+          defaultTtlSeconds: input.defaultTtlSeconds,
+          updatedAt: drizzleSql`now()`
+        }
+      })
+      .returning({
+        id: docSources.id,
+        sourceId: docSources.sourceId,
+        displayName: docSources.displayName,
+        enabled: docSources.enabled,
+        allowedUrlPatterns: docSources.allowedUrlPatterns,
+        defaultTtlSeconds: docSources.defaultTtlSeconds
+      });
 
-    return mapSource(requiredRow(rows, "upsertSource"));
+    return requiredRow(rows, "upsertSource");
   }
 
   async getSource(sourceId: string): Promise<DocSource | null> {
-    const rows = await this.sql<SourceRow[]>`
-      select id, source_id, display_name, enabled, allowed_url_patterns, default_ttl_seconds
-      from doc_sources
-      where source_id = ${sourceId}
-    `;
+    const rows = await this.drizzle()
+      .select({
+        id: docSources.id,
+        sourceId: docSources.sourceId,
+        displayName: docSources.displayName,
+        enabled: docSources.enabled,
+        allowedUrlPatterns: docSources.allowedUrlPatterns,
+        defaultTtlSeconds: docSources.defaultTtlSeconds
+      })
+      .from(docSources)
+      .where(eq(docSources.sourceId, sourceId))
+      .limit(1);
 
-    return rows[0] === undefined ? null : mapSource(rows[0]);
+    return rows[0] ?? null;
   }
 
   async listSourceStats(): Promise<StoredDocsSourceStats[]> {
@@ -493,36 +494,43 @@ export class RemoteDocsStorage {
   }
 
   async getPageByCanonicalUrl(sourceId: string, canonicalUrl: string): Promise<DocPage | null> {
-    const rows = await this.sql<PageRow[]>`
-      select id, source_id, url, canonical_url, title, content_hash
-      from doc_pages
-      where source_id = ${sourceId} and canonical_url = ${canonicalUrl}
-    `;
+    const rows = await this.drizzle()
+      .select({
+        id: docPages.id,
+        sourceId: docPages.sourceId,
+        url: docPages.url,
+        canonicalUrl: docPages.canonicalUrl,
+        title: docPages.title,
+        contentHash: docPages.contentHash
+      })
+      .from(docPages)
+      .where(and(eq(docPages.sourceId, sourceId), eq(docPages.canonicalUrl, canonicalUrl)))
+      .limit(1);
 
-    return rows[0] === undefined ? null : mapPage(rows[0]);
+    return rows[0] ?? null;
   }
 
   async getPageByUrl(input: { readonly sourceId: string; readonly url: string }): Promise<StoredDocsPage | null> {
-    const rows = await this.sql<PageDetailRow[]>`
-      select
-        id,
-        source_id,
-        url,
-        canonical_url,
-        title,
-        content,
-        content_hash,
-        fetched_at::text as fetched_at,
-        indexed_at::text as indexed_at,
-        expires_at::text as expires_at,
-        tombstoned_at::text as tombstoned_at,
-        tombstone_reason
-      from doc_pages
-      where source_id = ${input.sourceId}
-        and (url = ${input.url} or canonical_url = ${input.url})
-    `;
+    const rows = await this.drizzle()
+      .select({
+        id: docPages.id,
+        sourceId: docPages.sourceId,
+        url: docPages.url,
+        canonicalUrl: docPages.canonicalUrl,
+        title: docPages.title,
+        content: docPages.content,
+        contentHash: docPages.contentHash,
+        fetchedAt: docPages.fetchedAt,
+        indexedAt: docPages.indexedAt,
+        expiresAt: docPages.expiresAt,
+        tombstonedAt: docPages.tombstonedAt,
+        tombstoneReason: docPages.tombstoneReason
+      })
+      .from(docPages)
+      .where(and(eq(docPages.sourceId, input.sourceId), or(eq(docPages.url, input.url), eq(docPages.canonicalUrl, input.url))))
+      .limit(1);
 
-    return rows[0] === undefined ? null : mapPageDetail(rows[0]);
+    return rows[0] === undefined ? null : mapDrizzlePageDetail(rows[0]);
   }
 
   async markPageTombstoned(input: {
@@ -531,30 +539,30 @@ export class RemoteDocsStorage {
     readonly reason: string;
     readonly now: string;
   }): Promise<StoredDocsPage | null> {
-    const rows = await this.sql<PageDetailRow[]>`
-      update doc_pages
-      set
-        tombstoned_at = ${input.now},
-        tombstone_reason = ${input.reason},
-        updated_at = ${input.now}
-      where source_id = ${input.sourceId}
-        and (url = ${input.url} or canonical_url = ${input.url})
-      returning
-        id,
-        source_id,
-        url,
-        canonical_url,
-        title,
-        content,
-        content_hash,
-        fetched_at::text as fetched_at,
-        indexed_at::text as indexed_at,
-        expires_at::text as expires_at,
-        tombstoned_at::text as tombstoned_at,
-        tombstone_reason
-    `;
+    const rows = await this.drizzle()
+      .update(docPages)
+      .set({
+        tombstonedAt: input.now,
+        tombstoneReason: input.reason,
+        updatedAt: input.now
+      })
+      .where(and(eq(docPages.sourceId, input.sourceId), or(eq(docPages.url, input.url), eq(docPages.canonicalUrl, input.url))))
+      .returning({
+        id: docPages.id,
+        sourceId: docPages.sourceId,
+        url: docPages.url,
+        canonicalUrl: docPages.canonicalUrl,
+        title: docPages.title,
+        content: docPages.content,
+        contentHash: docPages.contentHash,
+        fetchedAt: docPages.fetchedAt,
+        indexedAt: docPages.indexedAt,
+        expiresAt: docPages.expiresAt,
+        tombstonedAt: docPages.tombstonedAt,
+        tombstoneReason: docPages.tombstoneReason
+      });
 
-    return rows[0] === undefined ? null : mapPageDetail(rows[0]);
+    return rows[0] === undefined ? null : mapDrizzlePageDetail(rows[0]);
   }
 
   async markSourcePagesTombstoned(input: {
@@ -562,16 +570,15 @@ export class RemoteDocsStorage {
     readonly reason: string;
     readonly now: string;
   }): Promise<number> {
-    const rows = await this.sql<Array<{ id: number }>>`
-      update doc_pages
-      set
-        tombstoned_at = ${input.now},
-        tombstone_reason = ${input.reason},
-        updated_at = ${input.now}
-      where source_id = ${input.sourceId}
-        and tombstoned_at is null
-      returning id
-    `;
+    const rows = await this.drizzle()
+      .update(docPages)
+      .set({
+        tombstonedAt: input.now,
+        tombstoneReason: input.reason,
+        updatedAt: input.now
+      })
+      .where(and(eq(docPages.sourceId, input.sourceId), isNull(docPages.tombstonedAt)))
+      .returning({ id: docPages.id });
 
     return rows.length;
   }
@@ -601,95 +608,115 @@ export class RemoteDocsStorage {
   }
 
   async getPageById(input: { readonly sourceId: string; readonly pageId: number }): Promise<StoredDocsPage | null> {
-    const rows = await this.sql<PageDetailRow[]>`
-      select
-        id,
-        source_id,
-        url,
-        canonical_url,
-        title,
-        content,
-        content_hash,
-        fetched_at::text as fetched_at,
-        indexed_at::text as indexed_at,
-        expires_at::text as expires_at,
-        tombstoned_at::text as tombstoned_at,
-        tombstone_reason
-      from doc_pages
-      where source_id = ${input.sourceId}
-        and id = ${input.pageId}
-    `;
+    const rows = await this.drizzle()
+      .select({
+        id: docPages.id,
+        sourceId: docPages.sourceId,
+        url: docPages.url,
+        canonicalUrl: docPages.canonicalUrl,
+        title: docPages.title,
+        content: docPages.content,
+        contentHash: docPages.contentHash,
+        fetchedAt: docPages.fetchedAt,
+        indexedAt: docPages.indexedAt,
+        expiresAt: docPages.expiresAt,
+        tombstonedAt: docPages.tombstonedAt,
+        tombstoneReason: docPages.tombstoneReason
+      })
+      .from(docPages)
+      .where(and(eq(docPages.sourceId, input.sourceId), eq(docPages.id, input.pageId)))
+      .limit(1);
 
-    return rows[0] === undefined ? null : mapPageDetail(rows[0]);
+    return rows[0] === undefined ? null : mapDrizzlePageDetail(rows[0]);
   }
 
   async upsertPage(input: UpsertPageInput): Promise<DocPage> {
-    const rows = await this.sql<PageRow[]>`
-      insert into doc_pages (
-        source_id, url, canonical_url, title, content, content_hash, http_status, fetched_at, indexed_at, expires_at
-      )
-      values (
-        ${input.sourceId},
-        ${input.url},
-        ${input.canonicalUrl},
-        ${input.title},
-        ${input.content},
-        ${input.contentHash},
-        ${input.httpStatus},
-        ${input.fetchedAt},
-        ${input.indexedAt},
-        ${input.expiresAt ?? null}
-      )
-      on conflict (source_id, canonical_url) do update set
-        url = excluded.url,
-        title = excluded.title,
-        content = excluded.content,
-        content_hash = excluded.content_hash,
-        http_status = excluded.http_status,
-        fetched_at = excluded.fetched_at,
-        indexed_at = excluded.indexed_at,
-        expires_at = excluded.expires_at,
-        tombstoned_at = null,
-        tombstone_reason = null,
-        updated_at = now()
-      returning id, source_id, url, canonical_url, title, content_hash
-    `;
+    const rows = await this.drizzle()
+      .insert(docPages)
+      .values({
+        sourceId: input.sourceId,
+        url: input.url,
+        canonicalUrl: input.canonicalUrl,
+        title: input.title,
+        content: input.content,
+        contentHash: input.contentHash,
+        httpStatus: input.httpStatus,
+        fetchedAt: input.fetchedAt,
+        indexedAt: input.indexedAt,
+        expiresAt: input.expiresAt ?? null
+      })
+      .onConflictDoUpdate({
+        target: [docPages.sourceId, docPages.canonicalUrl],
+        set: {
+          url: input.url,
+          title: input.title,
+          content: input.content,
+          contentHash: input.contentHash,
+          httpStatus: input.httpStatus,
+          fetchedAt: input.fetchedAt,
+          indexedAt: input.indexedAt,
+          expiresAt: input.expiresAt ?? null,
+          tombstonedAt: null,
+          tombstoneReason: null,
+          updatedAt: drizzleSql`now()`
+        }
+      })
+      .returning({
+        id: docPages.id,
+        sourceId: docPages.sourceId,
+        url: docPages.url,
+        canonicalUrl: docPages.canonicalUrl,
+        title: docPages.title,
+        contentHash: docPages.contentHash
+      });
 
-    return mapPage(requiredRow(rows, "upsertPage"));
+    return requiredRow(rows, "upsertPage");
   }
 
   async insertChunks(input: InsertChunksInput): Promise<DocChunk[]> {
-    return this.sql.begin(async (transaction) => {
+    return this.drizzle().transaction(async (transaction) => {
       const chunks: DocChunk[] = [];
 
       for (const chunk of input.chunks) {
-        const rows = await transaction<ChunkRow[]>`
-          insert into doc_chunks (
-            source_id, page_id, url, title, heading_path, chunk_index, content, content_hash, token_estimate
-          )
-          values (
-            ${input.sourceId},
-            ${input.pageId},
-            ${chunk.url},
-            ${chunk.title},
-            ${chunk.headingPath}::text[],
-            ${chunk.chunkIndex},
-            ${chunk.content},
-            ${chunk.contentHash},
-            ${chunk.tokenEstimate}
-          )
-          on conflict (source_id, page_id, content_hash) do update set
-            url = excluded.url,
-            title = excluded.title,
-            heading_path = excluded.heading_path,
-            chunk_index = excluded.chunk_index,
-            content = excluded.content,
-            token_estimate = excluded.token_estimate,
-            updated_at = now()
-          returning id, source_id, page_id, url, title, heading_path, chunk_index, content, content_hash, token_estimate
-        `;
+        const rows = await transaction
+          .insert(docChunks)
+          .values({
+            sourceId: input.sourceId,
+            pageId: input.pageId,
+            url: chunk.url,
+            title: chunk.title,
+            headingPath: [...chunk.headingPath],
+            chunkIndex: chunk.chunkIndex,
+            content: chunk.content,
+            contentHash: chunk.contentHash,
+            tokenEstimate: chunk.tokenEstimate
+          })
+          .onConflictDoUpdate({
+            target: [docChunks.sourceId, docChunks.pageId, docChunks.contentHash],
+            set: {
+              url: chunk.url,
+              title: chunk.title,
+              headingPath: [...chunk.headingPath],
+              chunkIndex: chunk.chunkIndex,
+              content: chunk.content,
+              tokenEstimate: chunk.tokenEstimate,
+              updatedAt: drizzleSql`now()`
+            }
+          })
+          .returning({
+            id: docChunks.id,
+            sourceId: docChunks.sourceId,
+            pageId: docChunks.pageId,
+            url: docChunks.url,
+            title: docChunks.title,
+            headingPath: docChunks.headingPath,
+            chunkIndex: docChunks.chunkIndex,
+            content: docChunks.content,
+            contentHash: docChunks.contentHash,
+            tokenEstimate: docChunks.tokenEstimate
+          });
 
-        chunks.push(mapChunk(requiredRow(rows, "insertChunks")));
+        chunks.push(requiredRow(rows, "insertChunks"));
       }
 
       return chunks;
@@ -749,11 +776,7 @@ export class RemoteDocsStorage {
   }
 
   async deleteChunksForPage(pageId: number): Promise<number> {
-    const rows = await this.sql<Array<{ id: number }>>`
-      delete from doc_chunks
-      where page_id = ${pageId}
-      returning id
-    `;
+    const rows = await this.drizzle().delete(docChunks).where(eq(docChunks.pageId, pageId)).returning({ id: docChunks.id });
 
     return rows.length;
   }
@@ -808,26 +831,33 @@ export class RemoteDocsStorage {
   }
 
   async createRefreshJob(input: CreateRefreshJobInput): Promise<RefreshJob> {
-    const rows = await this.sql<RefreshJobRow[]>`
-      insert into doc_refresh_jobs (source_id, url, job_type, reason, priority, run_after)
-      values (${input.sourceId}, ${input.url ?? null}, ${input.jobType}, ${input.reason}, ${input.priority}, ${input.runAfter ?? new Date().toISOString()})
-      returning
-        id,
-        source_id,
-        url,
-        job_type,
-        reason,
-        status,
-        priority,
-        run_after::text as run_after,
-        attempt_count,
-        last_error,
-        created_at::text as created_at,
-        updated_at::text as updated_at,
-        finished_at::text as finished_at
-    `;
+    const rows = await this.drizzle()
+      .insert(docRefreshJobs)
+      .values({
+        sourceId: input.sourceId,
+        url: input.url ?? null,
+        jobType: input.jobType,
+        reason: input.reason,
+        priority: input.priority,
+        runAfter: input.runAfter ?? new Date().toISOString()
+      })
+      .returning({
+        id: docRefreshJobs.id,
+        sourceId: docRefreshJobs.sourceId,
+        url: docRefreshJobs.url,
+        jobType: docRefreshJobs.jobType,
+        reason: docRefreshJobs.reason,
+        status: docRefreshJobs.status,
+        priority: docRefreshJobs.priority,
+        runAfter: docRefreshJobs.runAfter,
+        attemptCount: docRefreshJobs.attemptCount,
+        lastError: docRefreshJobs.lastError,
+        createdAt: docRefreshJobs.createdAt,
+        updatedAt: docRefreshJobs.updatedAt,
+        finishedAt: docRefreshJobs.finishedAt
+      });
 
-    return mapRefreshJob(requiredRow(rows, "createRefreshJob"));
+    return normalizeRefreshJob(requiredRow(rows, "createRefreshJob"));
   }
 
   async findPendingRefreshJob(input: {
@@ -835,40 +865,46 @@ export class RemoteDocsStorage {
     readonly url?: string;
     readonly jobType: RefreshJobType;
   }): Promise<RefreshJob | null> {
-    const rows = await this.sql<RefreshJobRow[]>`
-      select
-        id,
-        source_id,
-        url,
-        job_type,
-        reason,
-        status,
-        priority,
-        run_after::text as run_after,
-        attempt_count,
-        last_error,
-        created_at::text as created_at,
-        updated_at::text as updated_at,
-        finished_at::text as finished_at
-      from doc_refresh_jobs
-      where source_id = ${input.sourceId}
-        and coalesce(url, '') = coalesce(${input.url ?? null}, '')
-        and job_type = ${input.jobType}
-        and status in ('queued', 'running')
-      order by priority desc, created_at asc
-      limit 1
-    `;
+    const rows = await this.drizzle()
+      .select({
+        id: docRefreshJobs.id,
+        sourceId: docRefreshJobs.sourceId,
+        url: docRefreshJobs.url,
+        jobType: docRefreshJobs.jobType,
+        reason: docRefreshJobs.reason,
+        status: docRefreshJobs.status,
+        priority: docRefreshJobs.priority,
+        runAfter: docRefreshJobs.runAfter,
+        attemptCount: docRefreshJobs.attemptCount,
+        lastError: docRefreshJobs.lastError,
+        createdAt: docRefreshJobs.createdAt,
+        updatedAt: docRefreshJobs.updatedAt,
+        finishedAt: docRefreshJobs.finishedAt
+      })
+      .from(docRefreshJobs)
+      .where(
+        and(
+          eq(docRefreshJobs.sourceId, input.sourceId),
+          drizzleSql`coalesce(${docRefreshJobs.url}, '') = coalesce(${input.url ?? null}, '')`,
+          eq(docRefreshJobs.jobType, input.jobType),
+          inArray(docRefreshJobs.status, ["queued", "running"])
+        )
+      )
+      .orderBy(desc(docRefreshJobs.priority), asc(docRefreshJobs.createdAt))
+      .limit(1);
 
-    return rows[0] === undefined ? null : mapRefreshJob(rows[0]);
+    return rows[0] === undefined ? null : normalizeRefreshJob(rows[0]);
   }
 
   async countPendingRefreshJobs(input: { readonly sourceId?: string } = {}): Promise<number> {
-    const rows = await this.sql<Array<{ count: number }>>`
-      select count(*)::integer as count
-      from doc_refresh_jobs
-      where status in ('queued', 'running')
-        and (${input.sourceId ?? null}::text is null or source_id = ${input.sourceId ?? null})
-    `;
+    const rows = await this.drizzle()
+      .select({ count: drizzleSql<number>`count(*)::integer` })
+      .from(docRefreshJobs)
+      .where(
+        input.sourceId === undefined
+          ? inArray(docRefreshJobs.status, ["queued", "running"])
+          : and(inArray(docRefreshJobs.status, ["queued", "running"]), eq(docRefreshJobs.sourceId, input.sourceId))
+      );
 
     return Number(rows[0]?.count ?? 0);
   }
@@ -879,32 +915,34 @@ export class RemoteDocsStorage {
     readonly lastError?: string;
     readonly now?: string;
   }): Promise<RefreshJob> {
-    const rows = await this.sql<RefreshJobRow[]>`
-      update doc_refresh_jobs
-      set
-        status = ${input.status},
-        last_error = ${input.lastError ?? null},
-        updated_at = coalesce(${input.now ?? null}::timestamptz, now()),
-        started_at = case when ${input.status} = 'running' then coalesce(${input.now ?? null}::timestamptz, now()) else started_at end,
-        finished_at = case when ${input.status} in ('succeeded', 'failed') then coalesce(${input.now ?? null}::timestamptz, now()) else finished_at end
-      where id = ${input.id}
-      returning
-        id,
-        source_id,
-        url,
-        job_type,
-        reason,
-        status,
-        priority,
-        run_after::text as run_after,
-        attempt_count,
-        last_error,
-        created_at::text as created_at,
-        updated_at::text as updated_at,
-        finished_at::text as finished_at
-    `;
+    const currentTimestamp = drizzleSql`coalesce(${input.now ?? null}::timestamptz, now())`;
+    const rows = await this.drizzle()
+      .update(docRefreshJobs)
+      .set({
+        status: input.status,
+        lastError: input.lastError ?? null,
+        updatedAt: currentTimestamp,
+        startedAt: drizzleSql`case when ${input.status} = 'running' then ${currentTimestamp} else ${docRefreshJobs.startedAt} end`,
+        finishedAt: drizzleSql`case when ${input.status} in ('succeeded', 'failed') then ${currentTimestamp} else ${docRefreshJobs.finishedAt} end`
+      })
+      .where(eq(docRefreshJobs.id, input.id))
+      .returning({
+        id: docRefreshJobs.id,
+        sourceId: docRefreshJobs.sourceId,
+        url: docRefreshJobs.url,
+        jobType: docRefreshJobs.jobType,
+        reason: docRefreshJobs.reason,
+        status: docRefreshJobs.status,
+        priority: docRefreshJobs.priority,
+        runAfter: docRefreshJobs.runAfter,
+        attemptCount: docRefreshJobs.attemptCount,
+        lastError: docRefreshJobs.lastError,
+        createdAt: docRefreshJobs.createdAt,
+        updatedAt: docRefreshJobs.updatedAt,
+        finishedAt: docRefreshJobs.finishedAt
+      });
 
-    return mapRefreshJob(requiredRow(rows, "updateRefreshJobStatus"));
+    return normalizeRefreshJob(requiredRow(rows, "updateRefreshJobStatus"));
   }
 
   async claimRunnableRefreshJobs(input: { readonly limit: number; readonly now: string }): Promise<RefreshJob[]> {
@@ -1012,49 +1050,52 @@ export class RemoteDocsStorage {
     readonly jobType: RefreshJobType;
     readonly reason?: RefreshJobReason;
   }): Promise<RefreshJob | null> {
-    const rows = await this.sql<RefreshJobRow[]>`
-      select
-        id,
-        source_id,
-        url,
-        job_type,
-        reason,
-        status,
-        priority,
-        run_after::text as run_after,
-        attempt_count,
-        last_error,
-        created_at::text as created_at,
-        updated_at::text as updated_at,
-        finished_at::text as finished_at
-      from doc_refresh_jobs
-      where source_id = ${input.sourceId}
-        and job_type = ${input.jobType}
-        and (${input.reason ?? null}::text is null or reason = ${input.reason ?? null})
-      order by created_at desc
-      limit 1
-    `;
+    const rows = await this.drizzle()
+      .select({
+        id: docRefreshJobs.id,
+        sourceId: docRefreshJobs.sourceId,
+        url: docRefreshJobs.url,
+        jobType: docRefreshJobs.jobType,
+        reason: docRefreshJobs.reason,
+        status: docRefreshJobs.status,
+        priority: docRefreshJobs.priority,
+        runAfter: docRefreshJobs.runAfter,
+        attemptCount: docRefreshJobs.attemptCount,
+        lastError: docRefreshJobs.lastError,
+        createdAt: docRefreshJobs.createdAt,
+        updatedAt: docRefreshJobs.updatedAt,
+        finishedAt: docRefreshJobs.finishedAt
+      })
+      .from(docRefreshJobs)
+      .where(
+        input.reason === undefined
+          ? and(eq(docRefreshJobs.sourceId, input.sourceId), eq(docRefreshJobs.jobType, input.jobType))
+          : and(eq(docRefreshJobs.sourceId, input.sourceId), eq(docRefreshJobs.jobType, input.jobType), eq(docRefreshJobs.reason, input.reason))
+      )
+      .orderBy(desc(docRefreshJobs.createdAt))
+      .limit(1);
 
-    return rows[0] === undefined ? null : mapRefreshJob(rows[0]);
+    return rows[0] === undefined ? null : normalizeRefreshJob(rows[0]);
   }
 
   async recordRetrievalEvent(input: RecordRetrievalEventInput): Promise<RetrievalEvent> {
-    const rows = await this.sql<RetrievalEventRow[]>`
-      insert into doc_retrieval_events (
-        source_id, query_hash, mode, result_count, confidence, low_confidence, refresh_queued
-      )
-      values (
-        ${input.sourceId},
-        ${input.queryHash},
-        ${input.mode},
-        ${input.resultCount},
-        ${input.confidence},
-        ${input.lowConfidence},
-        ${input.refreshQueued}
-      )
-      returning id, source_id, query_hash
-    `;
+    const rows = await this.drizzle()
+      .insert(docRetrievalEvents)
+      .values({
+        sourceId: input.sourceId,
+        queryHash: input.queryHash,
+        mode: input.mode,
+        resultCount: input.resultCount,
+        confidence: input.confidence,
+        lowConfidence: input.lowConfidence,
+        refreshQueued: input.refreshQueued
+      })
+      .returning({
+        id: docRetrievalEvents.id,
+        sourceId: docRetrievalEvents.sourceId,
+        queryHash: docRetrievalEvents.queryHash
+      });
 
-    return mapRetrievalEvent(requiredRow(rows, "recordRetrievalEvent"));
+    return requiredRow(rows, "recordRetrievalEvent");
   }
 }

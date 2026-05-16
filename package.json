@@ -14,6 +14,8 @@
     "typecheck": "tsc --noEmit && bun run mcp-http:typecheck && bun run docs-worker:typecheck && bun run admin:contracts:typecheck && bun run admin:server:typecheck && bun run admin:client:typecheck",
     "check": "bun test && bun run typecheck",
     "db:migrate": "bun scripts/db-migrate.ts",
+    "db:drizzle:generate": "bunx drizzle-kit generate",
+    "db:drizzle:check": "bunx drizzle-kit check",
     "dev": "bun --watch apps/mcp-http/src/index.ts",
     "mcp-http:dev": "bun --cwd apps/mcp-http dev",
     "mcp-http:typecheck": "tsc -p apps/mcp-http/tsconfig.json --noEmit",
@@ -37,6 +39,8 @@
   },
   "devDependencies": {
     "@types/bun": "^1.3.2",
+    "drizzle-kit": "0.31.4",
+    "drizzle-orm": "0.44.5",
     "typescript": "^5.9.3"
   }
 }

@@ -14,7 +14,7 @@
 - `packages`: shared workspace APIs used by apps.
   - `packages/contracts`: docs/MCP-adjacent DTOs, Zod schemas, and structured errors.
   - `packages/admin-contracts`: browser-safe admin API DTOs and schemas shared by admin server/client.
-  - `packages/db`: Postgres client, migration runner, docs storage, row mappers, and database-facing types.
+  - `packages/db`: Postgres client, Drizzle schema/client wrapper, migration runner, docs storage, and database-facing types.
   - `packages/docs-domain`: shared docs-domain API surface for source policy, source packs, ingestion, embeddings, retrieval, refresh primitives, and docs tool services; many exports still facade root `src/docs` and `src/tools` implementation during the migration.
 - `src`: transitional compatibility and remaining root implementation surface. Root `src/http.ts` and `src/docs-worker.ts` wrap app entrypoints; `src/server.ts`, `src/http`, `src/resources`, `src/sources`, `src/cache`, and much of `src/docs/**` still back MCP resources and docs-domain facade exports; `src/docs/storage/*` and `src/shared/*` re-export package APIs for older imports.
 - `migrations/remote-docs`: canonical schema stream for MCP HTTP, docs worker, and admin console, including admin auth/audit tables.
