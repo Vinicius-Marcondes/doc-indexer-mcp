@@ -52,5 +52,8 @@ Thumbs.db
 .claude/
 .codex/
 
-# PRD and Tasks
-docs/prd/
+# Local PRD drafts are ignored by default; branch-critical PRDs are allowlisted.
+docs/prd/*
+!docs/prd/bun-dev-intel-mcp-admin-reintegration-monorepo-architecture.md
+!docs/prd/bun-dev-intel-mcp-migration-runner/
+!docs/prd/bun-dev-intel-mcp-migration-runner/**
